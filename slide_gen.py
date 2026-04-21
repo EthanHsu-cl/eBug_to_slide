@@ -4,27 +4,22 @@ from pathlib import Path
 
 from PIL import Image
 from pptx import Presentation
+from pptx.dml.color import RGBColor
 from pptx.util import Inches, Emu
 
 from parser import BugData, ImageStep
 
+_TYPE_COLORS = {
+    "Current":   RGBColor(0xC0, 0x00, 0x00),
+    "Reference": RGBColor(0xFF, 0xC0, 0x00),
+    "Proposal":  RGBColor(0xFF, 0x66, 0x00),
+}
+
 TEMPLATE_PATH = Path(__file__).parent / "UX ppt template.pptx"
 
-# Exact positions cloned from the template (in inches)
-TITLE_LEFT, TITLE_TOP = 0.548, 0.333
-TITLE_W, TITLE_H = 12.644, 0.687
-
-TYPE_LEFT, TYPE_TOP = 0.548, 0.869
-TYPE_W, TYPE_H = 9.654, 0.645
-
-VERSION_LEFT, VERSION_TOP = 11.610, 0.131
-VERSION_W, VERSION_H = 1.606, 0.404
-
-IMG_LEFT, IMG_TOP = 0.548, 1.470
-IMG_W, IMG_H = 12.237, 5.722
-
-ANNOT_LEFT, ANNOT_TOP = 13.458, 3.097
-ANNOT_W, ANNOT_H = 2.542, 0.505
+# Image area position and size (inches) — from template inspection
+IMG_LEFT, IMG_TOP = 0.5484, 1.4701
+IMG_W,    IMG_H   = 12.2366, 5.7217
 
 
 def _in(value: float) -> Emu:
@@ -39,136 +34,120 @@ def _find_layout(prs: Presentation, name: str):
 
 
 def _clone_slide_shapes(src_slide, dst_slide) -> None:
-    """Deep-copy all shapes from src_slide into dst_slide's shape tree."""
+    """Replace dst_slide's shapes with deep copies of src_slide's shapes."""
     sp_tree = dst_slide.shapes._spTree
-    for el in src_slide.shapes._spTree:
+    # spTree layout: [0]=nvGrpSpPr, [1]=grpSpPr, [2+]=shapes from layout.
+    # Remove all shapes add_slide() already added, keep only the two metadata nodes.
+    for child in list(sp_tree)[2:]:
+        sp_tree.remove(child)
+    # Append shapes from template slide (skip its own metadata nodes).
+    for el in list(src_slide.shapes._spTree)[2:]:
         sp_tree.append(copy.deepcopy(el))
 
 
 def _remove_template_slides(prs: Presentation, count: int) -> None:
-    """Remove the first *count* slides (the original template slides)."""
     sld_id_lst = prs.slides._sldIdLst
     for _ in range(count):
         sld_id_lst.remove(sld_id_lst[0])
 
 
-def _set_shape_text(slide, shape_name: str, text: str) -> None:
-    """Set text on the first shape whose name matches shape_name."""
-    for shape in slide.shapes:
-        if shape.name == shape_name and shape.has_text_frame:
-            tf = shape.text_frame
-            # Preserve paragraph formatting; just replace run text
-            for para in tf.paragraphs:
-                for run in para.runs:
-                    run.text = ""
-            if tf.paragraphs:
-                tf.paragraphs[0].runs[0].text = text if tf.paragraphs[0].runs else None
-                if not tf.paragraphs[0].runs:
-                    tf.paragraphs[0].text = text
-            return
+def _safe_set_text(tf, text: str) -> None:
+    """Set the text of the first paragraph, preserving existing run formatting."""
+    p = tf.paragraphs[0]
+    if p.runs:
+        for run in p.runs[1:]:
+            run.text = ""
+        p.runs[0].text = text
+    else:
+        p.text = text
 
 
-def _replace_image_placeholder(slide, image_data: bytes) -> None:
-    """
-    Remove the large main-area text box (the one whose text starts with '<image')
-    and insert the actual image, scaled to fit the same area with aspect ratio preserved.
-    """
-    # Find and remove the placeholder text box
-    placeholder_shape = None
-    for shape in slide.shapes:
-        if shape.has_text_frame and shape.text_frame.text.strip().startswith("<image"):
-            placeholder_shape = shape
-            break
+def _set_type_label(tf, text: str, color: RGBColor) -> None:
+    """Set type label text and apply the correct type color to the run."""
+    p = tf.paragraphs[0]
+    if p.runs:
+        for run in p.runs[1:]:
+            run.text = ""
+        p.runs[0].text = text
+        p.runs[0].font.color.rgb = color
+    else:
+        p.text = text
+        if p.runs:
+            p.runs[0].font.color.rgb = color
 
-    if placeholder_shape is not None:
-        sp = placeholder_shape.element
-        sp.getparent().remove(sp)
 
+def _insert_image(slide, image_data: bytes) -> None:
+    """Scale image to fit the main image area and add it to the slide."""
     if not image_data:
         return
-
-    # Calculate scaled dimensions preserving aspect ratio
     img = Image.open(BytesIO(image_data))
     img_w_px, img_h_px = img.size
 
     area_w = _in(IMG_W)
     area_h = _in(IMG_H)
-
     scale = min(area_w / img_w_px, area_h / img_h_px)
     final_w = int(img_w_px * scale)
     final_h = int(img_h_px * scale)
 
-    # Center within the image area
     left = _in(IMG_LEFT) + (area_w - final_w) // 2
-    top = _in(IMG_TOP) + (area_h - final_h) // 2
+    top  = _in(IMG_TOP)  + (area_h - final_h) // 2
 
     slide.shapes.add_picture(BytesIO(image_data), left, top, final_w, final_h)
 
 
-def _update_slide(slide, step: ImageStep, title: str, version_info: str) -> None:
-    """Populate a cloned slide with data from one ImageStep."""
-    # Title placeholder (shape named '標題 2')
-    for shape in slide.shapes:
-        if shape.shape_type == 1 and hasattr(shape, "placeholder_format"):  # PLACEHOLDER
-            if shape.placeholder_format and shape.placeholder_format.idx == 0:
-                shape.text_frame.paragraphs[0].runs[0].text = title
-                break
-    # Fallback: find any shape with "Short Description" text
-    for shape in slide.shapes:
-        if shape.has_text_frame and "Short Description" in shape.text_frame.text:
-            tf = shape.text_frame
-            if tf.paragraphs and tf.paragraphs[0].runs:
-                tf.paragraphs[0].runs[0].text = title
-            break
+def _update_slide(
+    slide,
+    step: ImageStep,
+    title: str,
+    version_info: str,
+    section_texts: dict[str, str],
+) -> None:
+    """Populate all text fields and insert the image on a cloned slide."""
+    img_placeholder = None
 
-    # Type label ("Current: <version>")
-    type_label = f"{step.img_type}: {version_info}"
     for shape in slide.shapes:
-        if shape.has_text_frame and shape.text_frame.text.strip().startswith(
-            ("Current:", "Reference:", "Proposal:")
-        ):
-            tf = shape.text_frame
-            if tf.paragraphs and tf.paragraphs[0].runs:
-                tf.paragraphs[0].runs[0].text = type_label
-            break
+        if not shape.has_text_frame:
+            continue
+        name = shape.name
 
-    # Version info box ("PX, fix in X/X")
-    for shape in slide.shapes:
-        if shape.has_text_frame and "fix in" in shape.text_frame.text.lower():
-            tf = shape.text_frame
-            if tf.paragraphs and tf.paragraphs[0].runs:
-                tf.paragraphs[0].runs[0].text = version_info
-            break
+        if name == "標題 2":
+            _safe_set_text(shape.text_frame, title)
 
-    # Annotation / step description box (the off-slide-right one)
-    for shape in slide.shapes:
-        if shape.has_text_frame and shape.left > _in(13.0):
-            tf = shape.text_frame
-            if tf.paragraphs and tf.paragraphs[0].runs:
-                tf.paragraphs[0].runs[0].text = step.text
-            elif tf.paragraphs:
-                tf.paragraphs[0].text = step.text
-            break
+        elif name == "Title 1" and shape.top < _in(1.3):
+            # Type label: use section description text if available, else version
+            section_text = section_texts.get(step.img_type, "")
+            label = f"{step.img_type}: {section_text}" if section_text else f"{step.img_type}: {version_info}"
+            color = _TYPE_COLORS.get(step.img_type, RGBColor(0, 0, 0))
+            _set_type_label(shape.text_frame, label, color)
 
-    # Replace image placeholder with the actual image
-    _replace_image_placeholder(slide, step.image_data)
+        elif name == "Title 1" and shape.top > _in(1.3):
+            img_placeholder = shape
+
+        elif name == "文字方塊 4":
+            _safe_set_text(shape.text_frame, version_info)
+
+        elif name == "文字方塊 9":
+            _safe_set_text(shape.text_frame, step.text)
+
+    if img_placeholder is not None:
+        img_placeholder.element.getparent().remove(img_placeholder.element)
+
+    _insert_image(slide, step.image_data)
 
 
 def generate(bug_data: BugData, output_path: str) -> None:
-    """
-    Generate a PPTX at *output_path* based on the template and *bug_data*.
-    One slide is created per ImageStep.
-    """
+    """Generate a PPTX at output_path — one slide per ImageStep."""
     prs = Presentation(str(TEMPLATE_PATH))
     n_template_slides = len(prs.slides)
 
     layout = _find_layout(prs, "1_只有標題 (no BK)")
-    template_slide = prs.slides[0]  # slide 1 is the "Current with annotation" style
+    # Slide 0 has the annotation box; use it as the template for all steps.
+    template_slide = prs.slides[0]
 
     for step in bug_data.image_steps:
         new_slide = prs.slides.add_slide(layout)
         _clone_slide_shapes(template_slide, new_slide)
-        _update_slide(new_slide, step, bug_data.title, bug_data.version_info)
+        _update_slide(new_slide, step, bug_data.title, bug_data.version_info, bug_data.section_texts)
 
     _remove_template_slides(prs, n_template_slides)
     prs.save(output_path)

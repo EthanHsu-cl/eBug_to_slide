@@ -133,5 +133,8 @@ Your session has expired. Log in again in the browser.
 **"No image-tagged repro steps found"**  
 Run with `--debug` to save the raw HTML. Open `<bug_code>_debug.html` and check that repro steps are present and use the `{type:…, step:…, file:…}` format.
 
+**Images fail to download (401)**  
+The eBug page uses cookie auth, but the image download endpoint (`DownloadeBugFile.ashx`) uses Windows Authentication — a separate layer that only the browser can handle transparently. When this happens, the tool prints the exact download URLs and a target folder path. Open each URL in Brave (which handles auth automatically), save the file with its original name, then re-run. The tool checks `images/<bug_code>/` for local copies before attempting a download.
+
 **Images missing from slides**  
-The tool tries to resolve image URLs from `<img>` tags in the page and from common attachment paths. If images are hosted at an unexpected path, open `<bug_code>_debug.html`, find the `<img>` src values, and let the developer know the URL pattern so `parser.py` can be updated.
+The tool downloads images from the Upload File table in the eBug report. If a download fails, check the warning output — it will show the exact URL attempted. Run with `--debug` to inspect the raw HTML.

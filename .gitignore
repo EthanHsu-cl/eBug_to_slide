@@ -13,6 +13,9 @@ __pycache__/
 
 # Tool outputs
 *_debug.html
+images/
 
 # macOS metadata
 .DS_Store
+
+/Report/

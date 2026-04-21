@@ -1,5 +1,7 @@
 python-pptx
 requests
+requests-ntlm
+keyring
 beautifulsoup4
 browser-cookie3
 Pillow

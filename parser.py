@@ -1,23 +1,29 @@
 import re
 import sys
 from dataclasses import dataclass, field
-from urllib.parse import urljoin, urlparse
+from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
 
 from scraper import fetch_image
 
-# Matches {type:Current, step:1, file:image1.png} with flexible whitespace
+# Matches {type:Current, step:1, file:image1.png}
+# "step:" may be wrapped in <b> tags in the raw HTML, but after text extraction it's a plain string.
 _IMAGE_TAG_RE = re.compile(
     r"\{type:\s*(\w+)\s*,\s*step:\s*(\d+)\s*,\s*file:\s*([^\}]+?)\s*\}"
 )
 
+# Upload File section uses this URL pattern for image downloads
+_DOWNLOAD_HREF_RE = re.compile(r"DownloadeBugFile\.ashx", re.IGNORECASE)
+
+TYPE_ORDER = {"Current": 1, "Reference": 2, "Proposal": 3}
+
 
 @dataclass
 class ImageStep:
-    step_num: int       # overall line number in the repro steps
-    text: str           # step text with the {…} tag stripped
+    step_num: int       # sequential number from the {step:N} tag
+    text: str           # step line text with the {…} tag stripped
     img_type: str       # "Current", "Reference", or "Proposal"
     image_file: str     # filename, e.g. "image1.png"
     image_data: bytes = field(default=b"", repr=False)
@@ -27,62 +33,139 @@ class ImageStep:
 class BugData:
     code: str
     title: str
-    version_info: str
+    version_info: str   # e.g. "v8.20" — used in version box
     image_steps: list[ImageStep]
+    section_texts: dict[str, str] = field(default_factory=dict)  # {"Current": "...", ...}
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# HTML → text helpers
 # ---------------------------------------------------------------------------
 
-def _text_of(tag) -> str:
-    return tag.get_text(" ", strip=True) if tag else ""
+def _html_to_text(tag) -> str:
+    """
+    Extract text treating <br> as newline and all other inline tags as
+    transparent (concatenated without separator).
+
+    The eBug page wraps "step:" in <b> tags inside the {type:...} metadata,
+    so using BeautifulSoup's get_text("\n") would split the tag across lines.
+    This function avoids that by only inserting newlines at actual <br> tags.
+    """
+    html = str(tag)
+    html = re.sub(r"<br\s*/?>", "\n", html, flags=re.IGNORECASE)
+    return BeautifulSoup(html, "lxml").get_text("")
 
 
-def _find_field_value(soup: BeautifulSoup, *labels: str) -> str:
+# ---------------------------------------------------------------------------
+# eBug-specific field extractors
+# ---------------------------------------------------------------------------
+
+def _find_short_description(soup: BeautifulSoup) -> str:
     """
-    Search for a table cell whose text matches any of *labels* and return
-    the text of the adjacent/sibling cell.  Works for both <th>/<td> pairs
-    and <td label> + <td value> layouts common in old ASP pages.
+    The short description lives in a <td colspan=5> like:
+      <font size=2><b>Short Description: </b></font>
+      <font color='red'><b>TITLE TEXT</b></font>
     """
-    for label in labels:
-        pattern = re.compile(label, re.IGNORECASE)
-        cell = soup.find(lambda t: t.name in ("td", "th") and pattern.search(t.get_text()))
-        if cell:
-            sibling = cell.find_next_sibling("td")
-            if sibling:
-                return sibling.get_text(" ", strip=True)
+    for td in soup.find_all("td"):
+        if "Short Description" not in td.get_text():
+            continue
+        red = td.find("font", attrs={"color": re.compile(r"^red$", re.IGNORECASE)})
+        if red:
+            return red.get_text("", strip=True)
     return ""
 
 
-def _find_repro_block(soup: BeautifulSoup) -> str:
+def _find_version(soup: BeautifulSoup) -> str:
     """
-    Return the raw text of the Repro Steps block. Tries several heuristics
-    common to ASP-based bug-tracker pages.
+    Version lives inline in a <td>:
+      Version: <font color='darkblue'>8.20</font>
+    The next sibling td is Build No, not the value we want.
     """
-    # 1. Look for a label cell that says "Repro" / "Steps" and take its sibling/next block
-    for label_text in ("Repro Step", "Repro", "Steps to Reproduce", "How to Reproduce"):
-        pattern = re.compile(label_text, re.IGNORECASE)
-        cell = soup.find(lambda t: t.name in ("td", "th", "div", "span", "label")
-                         and pattern.search(t.get_text()))
-        if cell:
-            # Look for a following <td> or <div> containing numbered steps
-            parent_row = cell.find_parent("tr")
-            if parent_row:
-                next_row = parent_row.find_next_sibling("tr")
-                if next_row:
-                    return next_row.get_text("\n", strip=True)
-            sibling = cell.find_next_sibling()
-            if sibling:
-                return sibling.get_text("\n", strip=True)
+    for td in soup.find_all("td"):
+        raw = td.get_text()
+        if re.match(r"\s*Version\s*:", raw, re.IGNORECASE):
+            blue = td.find("font", attrs={"color": re.compile(r"darkblue", re.IGNORECASE)})
+            if blue:
+                val = blue.get_text("", strip=True)
+                if val:
+                    return f"v{val}"
+    return ""
 
-    # 2. Fall back: find any block of text that contains the image tag pattern
-    for tag in soup.find_all(["td", "div", "pre", "textarea"]):
-        text = tag.get_text("\n")
+
+def _find_repro_text(soup: BeautifulSoup) -> tuple[str, str]:
+    """
+    Return (text, raw_html) of the repro/description block.
+    The raw HTML is needed to extract section texts from <Current>...</Current> markers.
+    """
+    for td in soup.find_all("td"):
+        classes = td.get("class") or []
+        if "NoLine2" not in classes and "noline2" not in [c.lower() for c in classes]:
+            continue
+        text = _html_to_text(td)
         if _IMAGE_TAG_RE.search(text):
-            return text
+            return text, str(td)
 
-    return ""
+    # Fallback: any container whose text matches the image tag pattern
+    for tag in soup.find_all(["td", "div", "pre"]):
+        text = _html_to_text(tag)
+        if _IMAGE_TAG_RE.search(text):
+            return text, str(tag)
+
+    return "", ""
+
+
+_SECTION_OPEN_RE = re.compile(r"^\s*<(Current|Reference|Proposal)>\s*$", re.IGNORECASE)
+_SECTION_CLOSE_RE = re.compile(r"^\s*</(Current|Reference|Proposal)>\s*$", re.IGNORECASE)
+
+
+def _find_section_texts(repro_text: str) -> dict[str, str]:
+    """
+    Extract description text for each section type from the processed repro text.
+    The text contains HTML-decoded markers like literal <Current>...</Current>.
+    Some sections have no closing tag (Reference, Proposal), so we collect until
+    the next opening tag or end of text.
+    """
+    texts: dict[str, str] = {}
+    current_section: str | None = None
+    section_lines: list[str] = []
+
+    for line in repro_text.splitlines():
+        if m := _SECTION_OPEN_RE.match(line):
+            if current_section and section_lines:
+                texts.setdefault(current_section, " ".join(section_lines))
+            current_section = m.group(1).capitalize()
+            section_lines = []
+        elif _SECTION_CLOSE_RE.match(line):
+            if current_section and section_lines:
+                texts.setdefault(current_section, " ".join(section_lines))
+            current_section = None
+            section_lines = []
+        elif current_section:
+            clean = _IMAGE_TAG_RE.sub("", line).strip()
+            if clean:
+                section_lines.append(clean)
+
+    if current_section and section_lines:
+        texts.setdefault(current_section, " ".join(section_lines))
+
+    return texts
+
+
+def _build_image_url_map(soup: BeautifulSoup) -> dict[str, str]:
+    """
+    The Upload File table lists images as:
+      <a href="https://ecl.cyberlink.com/dc/support/DownloadeBugFile.ashx?d=ID">
+        <u>image1.png</u>
+      </a>
+    Build filename.lower() → absolute download URL.
+    """
+    url_map: dict[str, str] = {}
+    for a in soup.find_all("a", href=_DOWNLOAD_HREF_RE):
+        href = a.get("href", "")
+        filename = a.get_text(strip=True).lower()
+        if filename and href:
+            url_map[filename] = href
+    return url_map
 
 
 # ---------------------------------------------------------------------------
@@ -95,100 +178,94 @@ def parse(
     session: requests.Session,
     page_url: str,
     debug_html_path: str | None = None,
+    browser: str = "auto",
 ) -> BugData:
-    """
-    Parse the eBug content page and return a BugData object.
-    Downloads images via *session*.  If *debug_html_path* is given, the raw
-    HTML is saved there regardless of parse success.
-    """
     if debug_html_path:
         with open(debug_html_path, "w", encoding="utf-8") as fh:
             fh.write(html)
 
     soup = BeautifulSoup(html, "lxml")
 
-    # --- Title ---
-    title = (
-        _find_field_value(soup, "Title", "Subject", "Summary", "Short Description")
-        or _text_of(soup.find("title"))
-        or bug_code
-    )
+    title = _find_short_description(soup) or bug_code
+    version_info = _find_version(soup) or "PX, fix in X/X"
+    img_url_map = _build_image_url_map(soup)
 
-    # --- Version / fix-version ---
-    version_info = _find_field_value(
-        soup, "Fix In", "Fix Version", "Fixed In", "Target Version", "Version"
-    ) or "PX, fix in X/X"
-
-    # --- Repro steps block ---
-    repro_text = _find_repro_block(soup)
+    repro_text, repro_raw = _find_repro_text(soup)
     if not repro_text:
+        debug_path = debug_html_path or f"{bug_code}_debug.html"
         print(
-            f"WARNING: Could not find repro steps in the page.\n"
-            f"Raw HTML saved to {debug_html_path or bug_code + '_debug.html'} for inspection.",
+            f"WARNING: Could not find repro steps.\n"
+            f"Raw HTML saved to {debug_path} for inspection.",
             file=sys.stderr,
         )
         if not debug_html_path:
-            path = f"{bug_code}_debug.html"
-            with open(path, "w", encoding="utf-8") as fh:
+            with open(debug_path, "w", encoding="utf-8") as fh:
                 fh.write(html)
+        return BugData(code=bug_code, title=title,
+                       version_info=version_info, image_steps=[])
 
-    # --- Parse image-tagged steps ---
+    section_texts = _find_section_texts(repro_text)
+
     image_steps: list[ImageStep] = []
+    missing: list[tuple[str, str]] = []   # (filename, download_url) for failed downloads
+    local_dir = Path(f"images/{bug_code}")
     base_url = page_url.rsplit("/", 1)[0] + "/"
-
-    # Build a map from image filename → <img> src found in the page
-    img_srcs: dict[str, str] = {}
-    for img_tag in soup.find_all("img"):
-        src = img_tag.get("src", "")
-        if src:
-            filename = src.rsplit("/", 1)[-1].split("?")[0]
-            img_srcs[filename.lower()] = urljoin(base_url, src)
 
     for line in repro_text.splitlines():
         m = _IMAGE_TAG_RE.search(line)
         if not m:
             continue
 
-        img_type, step_num_str, image_file = m.group(1), m.group(2), m.group(3).strip()
+        img_type = m.group(1)
+        step_num = int(m.group(2))
+        image_file = m.group(3).strip()
         clean_text = _IMAGE_TAG_RE.sub("", line).strip()
-        step_num = int(step_num_str)
 
-        # Resolve image URL: prefer <img> src found in page, else construct URL
-        img_url = img_srcs.get(image_file.lower()) or _guess_image_url(
-            base_url, bug_code, image_file
+        img_url = (
+            img_url_map.get(image_file.lower())
+            or f"{base_url}images/{bug_code}/{image_file}"
         )
 
-        image_data = b""
-        if img_url:
+        # 1. Try local copy first (user may have manually saved images here)
+        local_path = local_dir / image_file
+        if local_path.exists():
+            image_data = local_path.read_bytes()
+        else:
+            # 2. Try downloading
+            image_data = b""
             try:
-                image_data = fetch_image(session, img_url)
-            except Exception as exc:
-                print(f"WARNING: Could not download {image_file} from {img_url}: {exc}", file=sys.stderr)
+                image_data = fetch_image(session, img_url, browser)
+            except Exception:
+                missing.append((image_file, img_url))
 
-        image_steps.append(
-            ImageStep(
-                step_num=step_num,
-                text=clean_text,
-                img_type=img_type,
-                image_file=image_file,
-                image_data=image_data,
-            )
+        image_steps.append(ImageStep(
+            step_num=step_num,
+            text=clean_text,
+            img_type=img_type,
+            image_file=image_file,
+            image_data=image_data,
+        ))
+
+    if missing:
+        local_dir.mkdir(parents=True, exist_ok=True)
+        print(
+            f"\n{len(missing)} image(s) could not be downloaded automatically "
+            f"(the download endpoint requires Windows auth).\n"
+            f"To embed them, open each link in Brave, save to:\n"
+            f"  {local_dir.resolve()}/\n"
+            f"then re-run the tool.\n",
+            file=sys.stderr,
         )
+        for filename, url in missing:
+            print(f"  {filename}  →  {url}", file=sys.stderr)
+        print(file=sys.stderr)
+
+    image_steps.sort(key=lambda s: (TYPE_ORDER.get(s.img_type, 99), s.step_num))
 
     return BugData(
         code=bug_code,
         title=title,
         version_info=version_info,
         image_steps=image_steps,
+        section_texts=section_texts,
     )
-
-
-def _guess_image_url(base_url: str, bug_code: str, filename: str) -> str:
-    """Try a few common ASP attachment URL patterns."""
-    candidates = [
-        f"{base_url}images/{bug_code}/{filename}",
-        f"{base_url}Upload/{bug_code}/{filename}",
-        f"{base_url}Attachments/{bug_code}/{filename}",
-        f"{base_url}{filename}",
-    ]
-    return candidates[0]  # caller will try and fall back gracefully
