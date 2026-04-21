@@ -1,0 +1,18 @@
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment / preferences
+.env
+
+# Tool outputs
+*_debug.html
+
+# macOS metadata
+.DS_Store
