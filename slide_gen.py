@@ -5,21 +5,21 @@ from pathlib import Path
 from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
-from pptx.util import Inches, Emu
+from pptx.util import Inches, Emu, Pt
 
 from parser import BugData, ImageStep
+
+TEMPLATE_PATH = Path(__file__).parent / "Template" / "New Layout.pptx"
+
+# Image area position and size (inches) — from New Layout.pptx inspection
+IMG_LEFT, IMG_TOP = 1.2467, 1.6255
+IMG_W,    IMG_H   = 10.8399, 5.7217
 
 _TYPE_COLORS = {
     "Current":   RGBColor(0xC0, 0x00, 0x00),
     "Reference": RGBColor(0xFF, 0xC0, 0x00),
     "Proposal":  RGBColor(0xFF, 0x66, 0x00),
 }
-
-TEMPLATE_PATH = Path(__file__).parent / "UX ppt template.pptx"
-
-# Image area position and size (inches) — from template inspection
-IMG_LEFT, IMG_TOP = 0.5484, 1.4701
-IMG_W,    IMG_H   = 12.2366, 5.7217
 
 
 def _in(value: float) -> Emu:
@@ -103,7 +103,10 @@ def _update_slide(
     section_texts: dict[str, str],
 ) -> None:
     """Populate all text fields and insert the image on a cloned slide."""
-    img_placeholder = None
+    # Remove any existing picture shapes from the template (replaced by actual image)
+    for shape in list(slide.shapes):
+        if int(shape.shape_type) == 13:  # MSO_SHAPE_TYPE.PICTURE
+            shape.element.getparent().remove(shape.element)
 
     for shape in slide.shapes:
         if not shape.has_text_frame:
@@ -114,23 +117,22 @@ def _update_slide(
             _safe_set_text(shape.text_frame, title)
 
         elif name == "Title 1" and shape.top < _in(1.3):
-            # Type label: use section description text if available, else version
+            # Type label: section description with correct color
             section_text = section_texts.get(step.img_type, "")
-            label = f"{step.img_type}: {section_text}" if section_text else f"{step.img_type}: {version_info}"
+            label = f"{step.img_type}: {section_text}" if section_text else f"{step.img_type}:"
             color = _TYPE_COLORS.get(step.img_type, RGBColor(0, 0, 0))
             _set_type_label(shape.text_frame, label, color)
 
-        elif name == "Title 1" and shape.top > _in(1.3):
-            img_placeholder = shape
-
         elif name == "文字方塊 4":
-            _safe_set_text(shape.text_frame, version_info)
+            shape.top = Emu(0)
+            _safe_set_text(shape.text_frame, "PX, fix in X/X")
+            p = shape.text_frame.paragraphs[0]
+            for run in p.runs:
+                run.font.size = Pt(16)
 
         elif name == "文字方塊 9":
+            # Annotation box (intentionally off right edge of slide)
             _safe_set_text(shape.text_frame, step.text)
-
-    if img_placeholder is not None:
-        img_placeholder.element.getparent().remove(img_placeholder.element)
 
     _insert_image(slide, step.image_data)
 
@@ -141,7 +143,6 @@ def generate(bug_data: BugData, output_path: str) -> None:
     n_template_slides = len(prs.slides)
 
     layout = _find_layout(prs, "1_只有標題 (no BK)")
-    # Slide 0 has the annotation box; use it as the template for all steps.
     template_slide = prs.slides[0]
 
     for step in bug_data.image_steps:
