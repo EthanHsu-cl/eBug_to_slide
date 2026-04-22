@@ -85,6 +85,17 @@ def save_last_bug_code(code: str) -> None:
     _env_set("EBUG_LAST_BUG_CODE", code)
 
 
+_DEFAULT_OLLAMA_MODEL = "gemma4:e2b-it-q4_K_M"
+
+
+def load_ollama_model() -> str:
+    return _env_get("EBUG_OLLAMA_MODEL", _DEFAULT_OLLAMA_MODEL)
+
+
+def save_ollama_model(model: str) -> None:
+    _env_set("EBUG_OLLAMA_MODEL", model)
+
+
 # ---------------------------------------------------------------------------
 # NTLM credential storage (macOS Keychain via keyring)
 # ---------------------------------------------------------------------------

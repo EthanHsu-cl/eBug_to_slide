@@ -25,6 +25,7 @@ Requires Python 3.10+. The codebase uses `str | None` union syntax and other 3.1
 | [scraper.py](scraper.py) | Cookie extraction, HTTP fetch, `.env` preferences |
 | [parser.py](parser.py) | HTML parsing, image downloading |
 | [slide_gen.py](slide_gen.py) | PPTX generation via python-pptx |
+| [refiner.py](refiner.py) | Optional AI text refinement via local Ollama |
 
 Keep logic in the appropriate module; don't add scraping logic to `slide_gen.py`, etc.
 
@@ -34,6 +35,6 @@ Keep logic in the appropriate module; don't add scraping logic to `slide_gen.py`
 
 ## Generated Files — Do Not Commit
 
-- `.env` — auto-created; stores user preferences (`EBUG_BROWSER`, `EBUG_OUTPUT_DIR`, `EBUG_LAST_BUG_CODE`)
+- `.env` — auto-created; stores user preferences (`EBUG_BROWSER`, `EBUG_OUTPUT_DIR`, `EBUG_LAST_BUG_CODE`, `EBUG_OLLAMA_MODEL`)
 - `images/` — downloaded screenshots; re-fetched on each run
 - `*_debug.html` — produced by `--debug` flag; temporary inspection files

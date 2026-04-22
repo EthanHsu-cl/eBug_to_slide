@@ -76,7 +76,14 @@ def _load_bug_codes_from_file(path: str) -> list[str]:
     raise ValueError(f"Unsupported file type '{suffix}'. Use .txt, .json, .yaml, or .yml")
 
 
-def _run_single(bug_code: str, output_path: str, browser: str, debug: bool) -> bool:
+def _run_single(
+    bug_code: str,
+    output_path: str,
+    browser: str,
+    debug: bool,
+    ai_refine: bool = False,
+    ollama_model: str = "",
+) -> bool:
     """Fetch, parse, and generate a slide for one bug code. Returns True on success."""
     debug_html = f"{bug_code}_debug.html" if debug else None
     content_url = f"{EBUG_BASE}/HandleMainEbugContent.asp?BugCode={bug_code}&IsFromMail="
@@ -88,6 +95,10 @@ def _run_single(bug_code: str, output_path: str, browser: str, debug: bool) -> b
     print("Parsing page ...")
     from parser import parse
     bug_data = parse(html, bug_code, session, content_url, debug_html_path=debug_html, browser=browser)
+
+    if ai_refine:
+        from refiner import refine_bug_data
+        refine_bug_data(bug_data, ollama_model)
 
     if not bug_data.image_steps:
         print(
@@ -111,9 +122,11 @@ def main() -> None:
         clear_ntlm_credentials,
         load_browser_preference,
         load_last_bug_code,
+        load_ollama_model,
         load_output_dir,
         save_browser_preference,
         save_last_bug_code,
+        save_ollama_model,
         save_output_dir,
     )
 
@@ -171,6 +184,26 @@ def main() -> None:
         action="store_true",
         help="Save raw HTML to <bug_code>_debug.html for inspection",
     )
+    ap.add_argument(
+        "--ai-refine",
+        action="store_true",
+        help="Refine title and section text with a local Ollama model before generating slides",
+    )
+    ap.add_argument(
+        "--ollama-model",
+        metavar="MODEL",
+        default=None,
+        help=(
+            "Ollama model to use for --ai-refine (overrides saved preference). "
+            f"Saved: '{load_ollama_model()}'"
+        ),
+    )
+    ap.add_argument(
+        "--set-ollama-model",
+        metavar="MODEL",
+        default=None,
+        help="Save an Ollama model name as the default for --ai-refine (stored in .env)",
+    )
     args = ap.parse_args()
 
     if args.clear_credentials:
@@ -186,6 +219,10 @@ def main() -> None:
         save_output_dir(args.save_output_dir)
         print(f"Output directory saved: {args.save_output_dir}")
 
+    if args.set_ollama_model is not None:
+        save_ollama_model(args.set_ollama_model)
+        print(f"Ollama model preference saved: {args.set_ollama_model}")
+
     # --- Resolve input ---
     raw_input = args.url_or_code
 
@@ -196,6 +233,8 @@ def main() -> None:
             ap.error("url_or_code is required (no last bug code saved in .env)")
         print(f"No input provided — reusing last bug code: {last}")
         raw_input = last
+
+    effective_model = args.ollama_model if args.ollama_model else load_ollama_model()
 
     # Check if the input is a list file
     p = Path(raw_input)
@@ -209,7 +248,7 @@ def main() -> None:
         failures = []
         for code in bug_codes:
             output_path = _resolve_output(None, code, saved_dir)
-            ok = _run_single(code, output_path, browser, args.debug)
+            ok = _run_single(code, output_path, browser, args.debug, args.ai_refine, effective_model)
             if ok:
                 save_last_bug_code(code)
             else:
@@ -224,7 +263,7 @@ def main() -> None:
     output_path = _resolve_output(args.output, bug_code, load_output_dir())
     browser = load_browser_preference() if args.browser == "auto" else args.browser
 
-    ok = _run_single(bug_code, output_path, browser, args.debug)
+    ok = _run_single(bug_code, output_path, browser, args.debug, args.ai_refine, effective_model)
     if not ok:
         sys.exit(1)
     save_last_bug_code(bug_code)

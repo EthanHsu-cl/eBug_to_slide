@@ -7,6 +7,7 @@ from lxml import etree
 from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN
 from pptx.util import Inches, Emu, Pt
 
 from parser import BugData, ImageStep
@@ -66,18 +67,43 @@ def _safe_set_text(tf, text: str) -> None:
         p.text = text
 
 
-def _set_type_label(tf, text: str, color: RGBColor) -> None:
-    """Set type label text and apply the correct type color to the run."""
+def _set_type_label(tf, type_name: str, section_text: str, color: RGBColor) -> None:
+    """Build type-label paragraph with two runs:
+    - Run 1: "TypeName: " in type color, bold, 14pt
+    - Run 2: description text in Calibri, black, 14pt, no bold/italic
+    """
+    _A = _A_NS
     p = tf.paragraphs[0]
-    if p.runs:
-        for run in p.runs[1:]:
-            run.text = ""
-        p.runs[0].text = text
-        p.runs[0].font.color.rgb = color
-    else:
-        p.text = text
-        if p.runs:
-            p.runs[0].font.color.rgb = color
+    p_el = p._p
+
+    for r_el in list(p_el.findall(f"{{{_A}}}r")):
+        p_el.remove(r_el)
+
+    def _append_run(text, rgb, bold, italic=False, font_name=None):
+        r = p_el.makeelement(f"{{{_A}}}r", {})
+        rPr = etree.SubElement(r, f"{{{_A}}}rPr")
+        rPr.set("lang", "en-US")
+        rPr.set("sz", "1400")  # 14pt in hundredths of a point
+        rPr.set("b", "1" if bold else "0")
+        rPr.set("i", "1" if italic else "0")
+        sf = etree.SubElement(rPr, f"{{{_A}}}solidFill")
+        sc = etree.SubElement(sf, f"{{{_A}}}srgbClr")
+        sc.set("val", str(rgb))
+        if font_name:
+            lat = etree.SubElement(rPr, f"{{{_A}}}latin")
+            lat.set("typeface", font_name)
+        t_el = etree.SubElement(r, f"{{{_A}}}t")
+        t_el.text = text
+        end_rpr = p_el.find(f"{{{_A}}}endParaRPr")
+        if end_rpr is not None:
+            end_rpr.addprevious(r)
+        else:
+            p_el.append(r)
+
+    label_part = f"{type_name}: " if section_text else f"{type_name}:"
+    _append_run(label_part, color, bold=True)
+    if section_text:
+        _append_run(section_text, RGBColor(0, 0, 0), bold=False, italic=False, font_name="Calibri")
 
 
 def _force_shape_autofit(shape) -> None:
@@ -114,6 +140,33 @@ def _get_font_pt(shape, default: float = 12.0) -> float:
             if run.font.size:
                 return run.font.size / 12700
     return default
+
+
+def _set_no_autofit(shape) -> None:
+    """Remove all autofit elements so the shape keeps its explicitly set dimensions."""
+    bodyPr = shape.text_frame._txBody.find(f"{{{_A_NS}}}bodyPr")
+    if bodyPr is None:
+        return
+    for tag in ("noAutofit", "normAutofit", "spAutoFit"):
+        el = bodyPr.find(f"{{{_A_NS}}}{tag}")
+        if el is not None:
+            bodyPr.remove(el)
+
+
+def _fit_to_one_line(shape, text: str, default_pt: float, min_pt: float = 10.0) -> float:
+    """Return the largest font size (≤ default_pt, ≥ min_pt) that fits text in one line."""
+    if not text:
+        return default_pt
+    width_pt = shape.width / 12700
+    max_pt = width_pt / (len(text) * 0.52)
+    return max(min_pt, min(default_pt, max_pt))
+
+
+def _set_text_font_size(tf, pt: float) -> None:
+    """Set font size on every run in the text frame."""
+    for para in tf.paragraphs:
+        for run in para.runs:
+            run.font.size = Pt(pt)
 
 
 def _set_no_line(shape) -> None:
@@ -178,20 +231,26 @@ def _update_slide(
         if name == "標題 2":
             title_shape = shape
             _safe_set_text(shape.text_frame, title)
-            _fit_shape_height(shape, title, _get_font_pt(shape, 24.0))
+            font_pt = _fit_to_one_line(shape, title, _get_font_pt(shape, 24.0))
+            _set_text_font_size(shape.text_frame, font_pt)
+            shape.text_frame.word_wrap = False
+            _fit_shape_height(shape, title, font_pt)
+            _set_no_autofit(shape)
+            continue  # skip _force_shape_autofit — we own the dimensions
 
         elif name == "Title 1" and shape.top < _in(1.3):
             type_label_shape = shape
             section_text = section_texts.get(step.img_type, "")
-            label = f"{step.img_type}: {section_text}" if section_text else f"{step.img_type}:"
             color = _TYPE_COLORS.get(step.img_type, RGBColor(0, 0, 0))
-            _set_type_label(shape.text_frame, label, color)
-            _fit_shape_height(shape, label, _get_font_pt(shape, 14.0))
+            _set_type_label(shape.text_frame, step.img_type, section_text, color)
+            full_label = f"{step.img_type}: {section_text}" if section_text else f"{step.img_type}:"
+            _fit_shape_height(shape, full_label, 14.0)
 
         elif name == "文字方塊 4":
             shape.top = Emu(0)
             _safe_set_text(shape.text_frame, "PX, fix in X/X")
             p = shape.text_frame.paragraphs[0]
+            p.alignment = PP_ALIGN.RIGHT
             for run in p.runs:
                 run.font.size = Pt(16)
 
@@ -227,11 +286,21 @@ def generate(bug_data: BugData, output_path: str) -> None:
     layout = _find_layout(prs, "1_只有標題 (no BK)")
     template_slide = prs.slides[0]
 
-    for step in bug_data.image_steps:
+    steps = list(bug_data.image_steps)
+    if not any(s.img_type == "Reference" for s in steps):
+        insert_at = next(
+            (i for i, s in enumerate(steps) if s.img_type == "Proposal"),
+            len(steps),
+        )
+        steps.insert(insert_at, ImageStep(
+            step_num=1, text="", img_type="Reference", image_file="", image_data=b"",
+        ))
+
+    for step in steps:
         new_slide = prs.slides.add_slide(layout)
         _clone_slide_shapes(template_slide, new_slide)
         _update_slide(new_slide, step, bug_data.title, bug_data.version_info, bug_data.section_texts)
 
     _remove_template_slides(prs, n_template_slides)
     prs.save(output_path)
-    print(f"Saved: {output_path}  ({len(bug_data.image_steps)} slide(s))")
+    print(f"Saved: {output_path}  ({len(steps)} slide(s))")

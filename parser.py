@@ -19,6 +19,16 @@ _DOWNLOAD_HREF_RE = re.compile(r"DownloadeBugFile\.ashx", re.IGNORECASE)
 
 TYPE_ORDER = {"Current": 1, "Reference": 2, "Proposal": 3}
 
+_TYPE_ORDER_RE = re.compile(r'type_order\s*=\s*\{([^}]+)\}', re.DOTALL)
+
+
+def _parse_type_order(repro_text: str) -> dict[str, int]:
+    m = _TYPE_ORDER_RE.search(repro_text)
+    if not m:
+        return TYPE_ORDER
+    order = {e.group(1): int(e.group(2)) for e in re.finditer(r'"(\w+)"\s*:\s*(\d+)', m.group(1))}
+    return order or TYPE_ORDER
+
 
 @dataclass
 class ImageStep:
@@ -60,6 +70,18 @@ def _html_to_text(tag) -> str:
 # eBug-specific field extractors
 # ---------------------------------------------------------------------------
 
+def _strip_title_prefix(title: str) -> str:
+    """Remove the '[Abbrev] Product Version - ' prefix, keeping 'Module: description'.
+
+    eBug titles follow the format:
+        [Tag] ProductName Version - Module: description
+    We only want the 'Module: description' part on the slide.
+    Splits on the first ' - ' (space-dash-space); returns the original if not found.
+    """
+    _, sep, rest = title.partition(" - ")
+    return rest.strip() if sep else title
+
+
 def _find_short_description(soup: BeautifulSoup) -> str:
     """
     The short description lives in a <td colspan=5> like:
@@ -71,7 +93,7 @@ def _find_short_description(soup: BeautifulSoup) -> str:
             continue
         red = td.find("font", attrs={"color": re.compile(r"^red$", re.IGNORECASE)})
         if red:
-            return red.get_text("", strip=True)
+            return _strip_title_prefix(red.get_text("", strip=True))
     return ""
 
 
@@ -116,6 +138,8 @@ def _find_repro_text(soup: BeautifulSoup) -> tuple[str, str]:
 
 _SECTION_OPEN_RE = re.compile(r"^\s*<(Current|Reference|Proposal)>\s*$", re.IGNORECASE)
 _SECTION_CLOSE_RE = re.compile(r"^\s*</(Current|Reference|Proposal)>\s*$", re.IGNORECASE)
+# Catches inline close tags regardless of spelling, e.g. </Proosal> or </Referenc>
+_INLINE_CLOSE_TAG_RE = re.compile(r"\s*</\w+>.*$", re.IGNORECASE)
 
 
 def _find_section_texts(repro_text: str) -> dict[str, str]:
@@ -124,30 +148,40 @@ def _find_section_texts(repro_text: str) -> dict[str, str]:
     The text contains HTML-decoded markers like literal <Current>...</Current>.
     Some sections have no closing tag (Reference, Proposal), so we collect until
     the next opening tag or end of text.
+    Handles misspelled close tags (e.g. </Proosal>) by detecting any inline </word>.
     """
     texts: dict[str, str] = {}
     current_section: str | None = None
     section_lines: list[str] = []
 
+    def _flush():
+        nonlocal current_section, section_lines
+        if current_section and section_lines:
+            texts.setdefault(current_section, " ".join(section_lines))
+        current_section = None
+        section_lines = []
+
     for line in repro_text.splitlines():
         if m := _SECTION_OPEN_RE.match(line):
-            if current_section and section_lines:
-                texts.setdefault(current_section, " ".join(section_lines))
+            _flush()
             current_section = m.group(1).capitalize()
-            section_lines = []
         elif _SECTION_CLOSE_RE.match(line):
-            if current_section and section_lines:
-                texts.setdefault(current_section, " ".join(section_lines))
-            current_section = None
-            section_lines = []
+            _flush()
         elif current_section:
-            clean = _IMAGE_TAG_RE.sub("", line).strip()
-            if clean:
-                section_lines.append(clean)
+            # Strip inline close tag and any trailing garbage (handles misspellings)
+            inline_close = _INLINE_CLOSE_TAG_RE.search(line)
+            if inline_close:
+                line = line[:inline_close.start()]
+                clean = _IMAGE_TAG_RE.sub("", line).strip()
+                if clean:
+                    section_lines.append(clean)
+                _flush()
+            else:
+                clean = _IMAGE_TAG_RE.sub("", line).strip()
+                if clean:
+                    section_lines.append(clean)
 
-    if current_section and section_lines:
-        texts.setdefault(current_section, " ".join(section_lines))
-
+    _flush()
     return texts
 
 
@@ -260,7 +294,8 @@ def parse(
             print(f"  {filename}  →  {url}", file=sys.stderr)
         print(file=sys.stderr)
 
-    image_steps.sort(key=lambda s: (TYPE_ORDER.get(s.img_type, 99), s.step_num))
+    type_order = _parse_type_order(repro_text)
+    image_steps.sort(key=lambda s: (type_order.get(s.img_type, 99), s.step_num))
 
     return BugData(
         code=bug_code,

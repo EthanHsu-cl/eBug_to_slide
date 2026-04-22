@@ -98,6 +98,15 @@ python main.py PRP265213-0053 --debug
 
 # Remove stored NTLM credentials from macOS Keychain
 python main.py --clear-credentials
+
+# Refine slide text using the default local Ollama model
+python main.py PRP265213-0053 --ai-refine
+
+# Refine with a specific model (overrides saved preference for this run only)
+python main.py PRP265213-0053 --ai-refine --ollama-model gemma3:latest
+
+# Save a model preference so --ai-refine always uses it
+python main.py --set-ollama-model gemma3:latest
 ```
 
 ### Batch processing
@@ -144,6 +153,9 @@ python main.py bugs.yaml
 | `--save-browser` | | | Persist `--browser` to `.env` for future runs |
 | `--clear-credentials` | | | Remove stored NTLM credentials from macOS Keychain and exit |
 | `--debug` | | | Save raw HTML to `<bug_code>_debug.html` for inspection |
+| `--ai-refine` | | off | Refine title and section text using a local Ollama model before generating slides |
+| `--ollama-model MODEL` | | saved / `gemma4:e2b-it-q4_K_M` | Ollama model for this run (overrides saved preference) |
+| `--set-ollama-model MODEL` | | | Save Ollama model preference to `.env` |
 
 ### Browser auto-detection order
 
@@ -162,6 +174,29 @@ Defaults are stored in `.env` next to `main.py`. You can edit this file directly
 | `EBUG_BROWSER` | `--save-browser` | Default browser for cookie extraction |
 | `EBUG_OUTPUT_DIR` | `--save-output-dir` | Default output directory |
 | `EBUG_LAST_BUG_CODE` | auto-saved | Last successfully processed bug code; used when no argument is given |
+| `EBUG_OLLAMA_MODEL` | `--set-ollama-model` | Default Ollama model used by `--ai-refine` |
+
+---
+
+## AI Refinement (optional)
+
+When `--ai-refine` is passed, the tool sends the slide title and each section text (Current / Reference / Proposal) to a locally-running [Ollama](https://ollama.com) model before generating the PPTX. The model is prompted to act as a QA Engineer and will:
+
+- Fix grammatical and spelling errors
+- Simplify language so a manager can understand the issue at a glance
+- Preserve all technical facts (product names, version numbers, UI labels, etc.)
+
+**Setup:**
+
+1. [Install Ollama](https://ollama.com) and start it: `ollama serve`
+2. Pull the default model: `ollama pull gemma4:e2b-it-q4_K_M`
+3. Run with `--ai-refine`
+
+**Notes:**
+
+- The feature is fully opt-in. Without `--ai-refine`, the tool behaves exactly as before.
+- If Ollama is not running or the model is not found, a warning is printed and the original text is used — the slide is still generated.
+- Use `--set-ollama-model` to save a different model as your default.
 
 ---
 
@@ -197,3 +232,9 @@ The eBug page uses cookie auth, but the image download endpoint (`DownloadeBugFi
 
 **Images missing from slides**  
 The tool downloads images from the Upload File table in the eBug report. If a download fails, check the warning output — it will show the exact URL attempted. Run with `--debug` to inspect the raw HTML.
+
+**"WARNING: Ollama is not running at localhost:11434"**  
+Start Ollama (`ollama serve`) or install it from [ollama.com](https://ollama.com). The tool continues and generates the slide with the original (unrefined) text.
+
+**"WARNING: Model '...' not found in Ollama"**  
+Pull the model first: `ollama pull gemma4:e2b-it-q4_K_M`. Or specify a model you already have with `--ollama-model <name>`.
