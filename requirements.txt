@@ -6,3 +6,4 @@ beautifulsoup4
 browser-cookie3
 Pillow
 lxml
+pyyaml

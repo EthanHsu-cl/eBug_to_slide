@@ -8,17 +8,18 @@ Each repro step that references a screenshot becomes one slide — the image fil
 ## How it works
 
 The tool:
+
 1. Reads your existing browser session (no credentials stored) to authenticate with the eBug system
 2. Fetches the bug report from `HandleMainEbugContent.asp`
 3. Parses repro steps for image tags in the format `{type:Current, step:1, file:image1.png}`
 4. Downloads each referenced screenshot
-5. Generates a `.pptx` based on `UX ppt template.pptx` — one slide per image-tagged step
+5. Generates a `.pptx` based on the slide template — one slide per image-tagged step
 
 ### Repro step format
 
 Steps without an image tag are skipped. Steps with a tag produce one slide:
 
-```
+```text
 Repro Steps:
 1. Launch PMO
 2. Switch to AI Marketing Post
@@ -34,7 +35,7 @@ Supported types: `Current`, `Reference`, `Proposal`
 ### Slide layout (from template)
 
 | Area | Position | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | Title | top-left | Bug short description |
 | Type label | below title | `Current: <version>`, `Reference: …`, `Proposal: …` |
 | Version info | top-right | Fix version / sprint info |
@@ -77,8 +78,14 @@ python main.py PRP265213-0053
 # Full URL also works
 python main.py "https://ecl.cyberlink.com/Ebug/eBugHandle/HandleMainEbug.asp?BugCode=PRP265213-0053"
 
+# Re-run the last used bug code (no argument needed)
+python main.py
+
 # Specify output path
 python main.py PRP265213-0053 --output ~/Desktop/my_report.pptx
+
+# Save a default output directory so you never have to specify --output again
+python main.py --save-output-dir ~/Desktop/Reports
 
 # Specify browser explicitly
 python main.py PRP265213-0053 --browser brave
@@ -88,16 +95,55 @@ python main.py PRP265213-0053 --browser brave --save-browser
 
 # Save raw HTML for debugging if parsing fails
 python main.py PRP265213-0053 --debug
+
+# Remove stored NTLM credentials from macOS Keychain
+python main.py --clear-credentials
+```
+
+### Batch processing
+
+Pass a file containing multiple bug codes to process them all in one run.  
+Each bug produces its own `.pptx` in the configured output directory.
+
+**`.txt`** — one bug code per line (`#` lines are ignored):
+
+```text
+# Sprint 42
+PRP265213-0053
+PRP265213-0054
+PRP265213-0055
+```
+
+**`.json`** — top-level array:
+
+```json
+["PRP265213-0053", "PRP265213-0054", "PRP265213-0055"]
+```
+
+**`.yaml` / `.yml`** — top-level list (requires `pyyaml`, included in `requirements.txt`):
+
+```yaml
+- PRP265213-0053
+- PRP265213-0054
+- PRP265213-0055
+```
+
+```bash
+python main.py bugs.txt
+python main.py bugs.json
+python main.py bugs.yaml
 ```
 
 ### Options
 
 | Flag | Short | Default | Description |
-|---|---|---|---|
-| `--output` | `-o` | `./<bug_code>.pptx` | Output file path |
+| --- | --- | --- | --- |
+| `--output` | `-o` | `<EBUG_OUTPUT_DIR>/<bug_code>.pptx` | Output file path (single bug only) |
+| `--save-output-dir DIR` | | | Save DIR as the default output location (stored in `.env`) |
 | `--browser` | `-b` | `auto` (or saved preference) | Browser to read cookies from |
 | `--save-browser` | | | Persist `--browser` to `.env` for future runs |
-| `--debug` | | | Save raw HTML to `<bug_code>_debug.html` |
+| `--clear-credentials` | | | Remove stored NTLM credentials from macOS Keychain and exit |
+| `--debug` | | | Save raw HTML to `<bug_code>_debug.html` for inspection |
 
 ### Browser auto-detection order
 
@@ -107,17 +153,30 @@ Use `--save-browser` to set a permanent default and skip detection entirely.
 
 ---
 
+## Persistent settings (`.env`)
+
+Defaults are stored in `.env` next to `main.py`. You can edit this file directly or use the CLI flags above to update it.
+
+| Key | Set via | Description |
+| --- | --- | --- |
+| `EBUG_BROWSER` | `--save-browser` | Default browser for cookie extraction |
+| `EBUG_OUTPUT_DIR` | `--save-output-dir` | Default output directory |
+| `EBUG_LAST_BUG_CODE` | auto-saved | Last successfully processed bug code; used when no argument is given |
+
+---
+
 ## File structure
 
-```
+```text
 eBug_to_slide/
 ├── main.py               # CLI entry point
 ├── scraper.py            # Cookie extraction + HTTP fetch
 ├── parser.py             # HTML parsing + image download
 ├── slide_gen.py          # PPTX generation (python-pptx)
 ├── requirements.txt      # Python dependencies
-├── UX ppt template.pptx  # Slide template (do not rename)
-└── .env                  # Auto-created; stores browser preference
+├── Template/
+│   └── New Layout.pptx   # Slide template (do not rename or move)
+└── .env                  # Auto-created; stores preferences and last bug code
 ```
 
 ---

@@ -1,4 +1,5 @@
 import copy
+import math
 from io import BytesIO
 from pathlib import Path
 
@@ -14,6 +15,8 @@ TEMPLATE_PATH = Path(__file__).parent / "Template" / "New Layout.pptx"
 # Image area position and size (inches) — from New Layout.pptx inspection
 IMG_LEFT, IMG_TOP = 1.2467, 1.6255
 IMG_W,    IMG_H   = 10.8399, 5.7217
+
+_A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
 _TYPE_COLORS = {
     "Current":   RGBColor(0xC0, 0x00, 0x00),
@@ -76,6 +79,42 @@ def _set_type_label(tf, text: str, color: RGBColor) -> None:
             p.runs[0].font.color.rgb = color
 
 
+def _force_shape_autofit(shape) -> None:
+    """Set spAutoFit directly in XML, replacing any conflicting autofit element."""
+    bodyPr = shape.text_frame._txBody.find(f"{{{_A_NS}}}bodyPr")
+    if bodyPr is None:
+        return
+    for tag in ("noAutofit", "normAutofit", "spAutoFit"):
+        el = bodyPr.find(f"{{{_A_NS}}}{tag}")
+        if el is not None:
+            bodyPr.remove(el)
+    bodyPr.append(bodyPr.makeelement(f"{{{_A_NS}}}spAutoFit", {}))
+    shape.text_frame.word_wrap = True
+
+
+def _fit_shape_height(shape, text: str, font_pt: float) -> None:
+    """Explicitly set shape height to fit text, so the saved PPTX renders correctly
+    without relying on PowerPoint's open-time recalculation."""
+    width_pt = shape.width / 12700
+    # Average proportional character width ≈ 0.52× font size
+    chars_per_line = max(1, width_pt / (font_pt * 0.52))
+    lines = sum(
+        max(1, math.ceil(len(para) / chars_per_line)) if para else 1
+        for para in (text or "").split("\n")
+    )
+    line_height_emu = int(font_pt * 1.4 * 12700)
+    padding_emu = int(0.15 * 914400)
+    shape.height = lines * line_height_emu + padding_emu
+
+
+def _get_font_pt(shape, default: float = 12.0) -> float:
+    for para in shape.text_frame.paragraphs:
+        for run in para.runs:
+            if run.font.size:
+                return run.font.size / 12700
+    return default
+
+
 def _insert_image(slide, image_data: bytes) -> None:
     """Scale image to fit the main image area and add it to the slide."""
     if not image_data:
@@ -115,13 +154,14 @@ def _update_slide(
 
         if name == "標題 2":
             _safe_set_text(shape.text_frame, title)
+            _fit_shape_height(shape, title, _get_font_pt(shape, 24.0))
 
         elif name == "Title 1" and shape.top < _in(1.3):
-            # Type label: section description with correct color
             section_text = section_texts.get(step.img_type, "")
             label = f"{step.img_type}: {section_text}" if section_text else f"{step.img_type}:"
             color = _TYPE_COLORS.get(step.img_type, RGBColor(0, 0, 0))
             _set_type_label(shape.text_frame, label, color)
+            _fit_shape_height(shape, label, _get_font_pt(shape, 14.0))
 
         elif name == "文字方塊 4":
             shape.top = Emu(0)
@@ -133,6 +173,9 @@ def _update_slide(
         elif name == "文字方塊 9":
             # Annotation box (intentionally off right edge of slide)
             _safe_set_text(shape.text_frame, step.text)
+            _fit_shape_height(shape, step.text, _get_font_pt(shape, 12.0))
+
+        _force_shape_autofit(shape)
 
     _insert_image(slide, step.image_data)
 

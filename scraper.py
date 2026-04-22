@@ -77,6 +77,14 @@ def save_output_dir(path: str) -> None:
     _env_set("EBUG_OUTPUT_DIR", path)
 
 
+def load_last_bug_code() -> str:
+    return _env_get("EBUG_LAST_BUG_CODE", "")
+
+
+def save_last_bug_code(code: str) -> None:
+    _env_set("EBUG_LAST_BUG_CODE", code)
+
+
 # ---------------------------------------------------------------------------
 # NTLM credential storage (macOS Keychain via keyring)
 # ---------------------------------------------------------------------------
