@@ -3,6 +3,7 @@ import math
 from io import BytesIO
 from pathlib import Path
 
+from lxml import etree
 from PIL import Image
 from pptx import Presentation
 from pptx.dml.color import RGBColor
@@ -115,21 +116,39 @@ def _get_font_pt(shape, default: float = 12.0) -> float:
     return default
 
 
-def _insert_image(slide, image_data: bytes) -> None:
-    """Scale image to fit the main image area and add it to the slide."""
+def _set_no_line(shape) -> None:
+    """Remove the visible border/outline from a shape by setting its line to noFill."""
+    sp_pr = shape._element.spPr
+    existing = sp_pr.find(f"{{{_A_NS}}}ln")
+    if existing is not None:
+        sp_pr.remove(existing)
+    ln = etree.SubElement(sp_pr, f"{{{_A_NS}}}ln")
+    etree.SubElement(ln, f"{{{_A_NS}}}noFill")
+
+
+def _insert_image(slide, image_data: bytes, img_top: Emu | None = None) -> None:
+    """Scale image to fit the main image area and add it to the slide.
+
+    img_top overrides IMG_TOP when the header content has grown taller than
+    the default layout, pushing the image down to avoid covering text.
+    """
     if not image_data:
         return
     img = Image.open(BytesIO(image_data))
     img_w_px, img_h_px = img.size
 
+    if img_top is None:
+        img_top = _in(IMG_TOP)
+
     area_w = _in(IMG_W)
-    area_h = _in(IMG_H)
+    # Shrink the available height by however much we pushed the image down.
+    area_h = _in(IMG_H) - (img_top - _in(IMG_TOP))
     scale = min(area_w / img_w_px, area_h / img_h_px)
     final_w = int(img_w_px * scale)
     final_h = int(img_h_px * scale)
 
     left = _in(IMG_LEFT) + (area_w - final_w) // 2
-    top  = _in(IMG_TOP)  + (area_h - final_h) // 2
+    top  = img_top + (area_h - final_h) // 2
 
     slide.shapes.add_picture(BytesIO(image_data), left, top, final_w, final_h)
 
@@ -147,16 +166,22 @@ def _update_slide(
         if int(shape.shape_type) == 13:  # MSO_SHAPE_TYPE.PICTURE
             shape.element.getparent().remove(shape.element)
 
+    title_shape = None
+    type_label_shape = None
+
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
+        _set_no_line(shape)
         name = shape.name
 
         if name == "標題 2":
+            title_shape = shape
             _safe_set_text(shape.text_frame, title)
             _fit_shape_height(shape, title, _get_font_pt(shape, 24.0))
 
         elif name == "Title 1" and shape.top < _in(1.3):
+            type_label_shape = shape
             section_text = section_texts.get(step.img_type, "")
             label = f"{step.img_type}: {section_text}" if section_text else f"{step.img_type}:"
             color = _TYPE_COLORS.get(step.img_type, RGBColor(0, 0, 0))
@@ -177,7 +202,21 @@ def _update_slide(
 
         _force_shape_autofit(shape)
 
-    _insert_image(slide, step.image_data)
+    # Push the type label below the short description so they don't overlap.
+    if title_shape and type_label_shape:
+        gap = Emu(int(0.08 * 914400))  # 0.08 inch breathing room
+        type_label_shape.top = title_shape.top + title_shape.height + gap
+
+    # If the type label now sits below the default image top, move the image
+    # down to match so text is never covered.
+    img_top = _in(IMG_TOP)
+    if type_label_shape:
+        label_bottom = type_label_shape.top + type_label_shape.height
+        gap = Emu(int(0.08 * 914400))
+        if label_bottom + gap > img_top:
+            img_top = label_bottom + gap
+
+    _insert_image(slide, step.image_data, img_top)
 
 
 def generate(bug_data: BugData, output_path: str) -> None:
