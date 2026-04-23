@@ -14,9 +14,17 @@ from parser import BugData, ImageStep
 
 TEMPLATE_PATH = Path(__file__).parent / "Template" / "New Layout.pptx"
 
-# Image area position and size (inches) — from New Layout.pptx inspection
-IMG_LEFT, IMG_TOP = 1.2467, 1.6255
-IMG_W,    IMG_H   = 10.8399, 5.7217
+# Fixed image area (EMU) — from Template/1(1).pptx
+_IMG_LEFT = 1181294
+_IMG_TOP  = 1370076
+_IMG_W    = 9829379
+_IMG_H    = 5182948
+
+# Fixed text-box geometry (EMU) — from Template/1(1).pptx
+_TITLE_TOP    = 293843   # 標題 2  (Short Description)
+_TITLE_HEIGHT = 543850
+_LABEL_TOP    = 905683   # Title 1 (Current / Reference / Proposal)
+_LABEL_HEIGHT = 286232
 
 _A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 
@@ -25,10 +33,6 @@ _TYPE_COLORS = {
     "Reference": RGBColor(0xFF, 0xC0, 0x00),
     "Proposal":  RGBColor(0xFF, 0x66, 0x00),
 }
-
-
-def _in(value: float) -> Emu:
-    return Inches(value)
 
 
 def _find_layout(prs: Presentation, name: str):
@@ -119,6 +123,14 @@ def _force_shape_autofit(shape) -> None:
     shape.text_frame.word_wrap = True
 
 
+def _get_font_pt(shape, default: float = 12.0) -> float:
+    for para in shape.text_frame.paragraphs:
+        for run in para.runs:
+            if run.font.size:
+                return run.font.size / 12700
+    return default
+
+
 def _fit_shape_height(shape, text: str, font_pt: float) -> None:
     """Explicitly set shape height to fit text, so the saved PPTX renders correctly
     without relying on PowerPoint's open-time recalculation."""
@@ -134,14 +146,6 @@ def _fit_shape_height(shape, text: str, font_pt: float) -> None:
     shape.height = lines * line_height_emu + padding_emu
 
 
-def _get_font_pt(shape, default: float = 12.0) -> float:
-    for para in shape.text_frame.paragraphs:
-        for run in para.runs:
-            if run.font.size:
-                return run.font.size / 12700
-    return default
-
-
 def _set_no_autofit(shape) -> None:
     """Remove all autofit elements so the shape keeps its explicitly set dimensions."""
     bodyPr = shape.text_frame._txBody.find(f"{{{_A_NS}}}bodyPr")
@@ -151,15 +155,6 @@ def _set_no_autofit(shape) -> None:
         el = bodyPr.find(f"{{{_A_NS}}}{tag}")
         if el is not None:
             bodyPr.remove(el)
-
-
-def _fit_to_one_line(shape, text: str, default_pt: float, min_pt: float = 10.0) -> float:
-    """Return the largest font size (≤ default_pt, ≥ min_pt) that fits text in one line."""
-    if not text:
-        return default_pt
-    width_pt = shape.width / 12700
-    max_pt = width_pt / (len(text) * 0.52)
-    return max(min_pt, min(default_pt, max_pt))
 
 
 def _set_text_font_size(tf, pt: float) -> None:
@@ -179,29 +174,21 @@ def _set_no_line(shape) -> None:
     etree.SubElement(ln, f"{{{_A_NS}}}noFill")
 
 
-def _insert_image(slide, image_data: bytes, img_top: Emu | None = None) -> None:
-    """Scale image to fit the main image area and add it to the slide.
-
-    img_top overrides IMG_TOP when the header content has grown taller than
-    the default layout, pushing the image down to avoid covering text.
-    """
+def _insert_image(slide, image_data: bytes) -> None:
+    """Scale image to fill the fixed image area and centre it."""
     if not image_data:
         return
     img = Image.open(BytesIO(image_data))
     img_w_px, img_h_px = img.size
 
-    if img_top is None:
-        img_top = _in(IMG_TOP)
-
-    area_w = _in(IMG_W)
-    # Shrink the available height by however much we pushed the image down.
-    area_h = _in(IMG_H) - (img_top - _in(IMG_TOP))
+    area_w = Emu(_IMG_W)
+    area_h = Emu(_IMG_H)
     scale = min(area_w / img_w_px, area_h / img_h_px)
     final_w = int(img_w_px * scale)
     final_h = int(img_h_px * scale)
 
-    left = _in(IMG_LEFT) + (area_w - final_w) // 2
-    top  = img_top + (area_h - final_h) // 2
+    left = Emu(_IMG_LEFT) + (area_w - final_w) // 2
+    top  = Emu(_IMG_TOP)  + (area_h - final_h) // 2
 
     slide.shapes.add_picture(BytesIO(image_data), left, top, final_w, final_h)
 
@@ -219,9 +206,6 @@ def _update_slide(
         if int(shape.shape_type) == 13:  # MSO_SHAPE_TYPE.PICTURE
             shape.element.getparent().remove(shape.element)
 
-    title_shape = None
-    type_label_shape = None
-
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
@@ -229,23 +213,20 @@ def _update_slide(
         name = shape.name
 
         if name == "標題 2":
-            title_shape = shape
-            shape.top -= 15 * 9525  # move up 15px
+            shape.top    = Emu(_TITLE_TOP)
+            shape.height = Emu(_TITLE_HEIGHT)
             _safe_set_text(shape.text_frame, title)
-            font_pt = _fit_to_one_line(shape, title, _get_font_pt(shape, 24.0))
-            _set_text_font_size(shape.text_frame, font_pt)
-            shape.text_frame.word_wrap = False
-            _fit_shape_height(shape, title, font_pt)
+            _set_text_font_size(shape.text_frame, 24.0)
+            shape.text_frame.word_wrap = True
             _set_no_autofit(shape)
-            continue  # skip _force_shape_autofit — we own the dimensions
+            continue  # keep the shape's own dimensions
 
-        elif name == "Title 1" and shape.top < _in(1.3):
-            type_label_shape = shape
+        elif name == "Title 1" and shape.top < Inches(1.3):
+            shape.top    = Emu(_LABEL_TOP)
+            shape.height = Emu(_LABEL_HEIGHT)
             section_text = section_texts.get(step.img_type, "")
             color = _TYPE_COLORS.get(step.img_type, RGBColor(0, 0, 0))
             _set_type_label(shape.text_frame, step.img_type, section_text, color)
-            full_label = f"{step.img_type}: {section_text}" if section_text else f"{step.img_type}:"
-            _fit_shape_height(shape, full_label, 14.0)
 
         elif name == "文字方塊 4":
             shape.top = Emu(0)
@@ -262,22 +243,7 @@ def _update_slide(
 
         _force_shape_autofit(shape)
 
-    # Push the type label below the short description so they don't overlap.
-    if title_shape and type_label_shape:
-        gap = Emu(int(0.08 * 914400))  # 0.08 inch breathing room
-        type_label_shape.top = title_shape.top + title_shape.height + gap
-        type_label_shape.top -= 20 * 9525  # move up 20px
-
-    # If the type label now sits below the default image top, move the image
-    # down to match so text is never covered.
-    img_top = _in(IMG_TOP) - 15 * 9525  # move up 15px
-    if type_label_shape:
-        label_bottom = type_label_shape.top + type_label_shape.height
-        gap = Emu(int(0.08 * 914400))
-        if label_bottom + gap > img_top:
-            img_top = label_bottom + gap
-
-    _insert_image(slide, step.image_data, img_top)
+    _insert_image(slide, step.image_data)
 
 
 def generate(bug_data: BugData, output_path: str) -> None:
