@@ -230,6 +230,7 @@ def _update_slide(
 
         if name == "標題 2":
             title_shape = shape
+            shape.top -= 15 * 9525  # move up 15px
             _safe_set_text(shape.text_frame, title)
             font_pt = _fit_to_one_line(shape, title, _get_font_pt(shape, 24.0))
             _set_text_font_size(shape.text_frame, font_pt)
@@ -265,10 +266,11 @@ def _update_slide(
     if title_shape and type_label_shape:
         gap = Emu(int(0.08 * 914400))  # 0.08 inch breathing room
         type_label_shape.top = title_shape.top + title_shape.height + gap
+        type_label_shape.top -= 20 * 9525  # move up 20px
 
     # If the type label now sits below the default image top, move the image
     # down to match so text is never covered.
-    img_top = _in(IMG_TOP)
+    img_top = _in(IMG_TOP) - 15 * 9525  # move up 15px
     if type_label_shape:
         label_bottom = type_label_shape.top + type_label_shape.height
         gap = Emu(int(0.08 * 914400))

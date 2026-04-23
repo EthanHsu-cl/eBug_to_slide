@@ -106,17 +106,30 @@ def refine_text(text: str, model: str) -> str:
     return result
 
 
+def _strip_module_prefix(title: str) -> str:
+    """Return only the description part after 'Module: ', or the full title if not found."""
+    _, sep, rest = title.partition(": ")
+    return rest.strip() if sep else title
+
+
 def refine_bug_data(bug_data: BugData, model: str) -> None:
-    """Refine bug_data.title and section_texts values in-place using Ollama."""
+    """Refine bug_data.title and section_texts values in-place using Ollama.
+
+    The module prefix (e.g. 'VideoStudio: ') is stripped from the title before
+    refinement so only the short description appears on the slide.
+    """
     if not check_ollama_available(model):
+        # Still strip the module prefix even when AI is unavailable.
+        bug_data.title = _strip_module_prefix(bug_data.title)
         return
 
     print(f"Refining text with Ollama model '{model}' ...")
 
     try:
-        bug_data.title = refine_text(bug_data.title, model)
+        bug_data.title = refine_text(_strip_module_prefix(bug_data.title), model)
     except Exception as exc:
         print(f"WARNING: AI refinement failed for title: {exc}", file=sys.stderr)
+        bug_data.title = _strip_module_prefix(bug_data.title)
 
     for key in ("Current", "Reference", "Proposal"):
         if not bug_data.section_texts.get(key):

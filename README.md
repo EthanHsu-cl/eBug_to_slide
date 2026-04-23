@@ -180,11 +180,13 @@ Defaults are stored in `.env` next to `main.py`. You can edit this file directly
 
 ## AI Refinement (optional)
 
-When `--ai-refine` is passed, the tool sends the slide title and each section text (Current / Reference / Proposal) to a locally-running [Ollama](https://ollama.com) model before generating the PPTX. The model is prompted to act as a QA Engineer and will:
+When `--ai-refine` is passed, the tool:
 
-- Fix grammatical and spelling errors
-- Simplify language so a manager can understand the issue at a glance
-- Preserve all technical facts (product names, version numbers, UI labels, etc.)
+1. **Strips the module prefix** from the slide title — e.g. `"VideoStudio: Something broken"` becomes `"Something broken"` so only the short description appears on the slide.
+2. **Refines the stripped title and each section text** (Current / Reference / Proposal) using a locally-running [Ollama](https://ollama.com) model. The model is prompted to act as a QA Engineer and will:
+   - Fix grammatical and spelling errors
+   - Simplify language so a manager can understand the issue at a glance
+   - Preserve all technical facts (product names, version numbers, UI labels, etc.)
 
 **Setup:**
 
