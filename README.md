@@ -210,6 +210,7 @@ eBug_to_slide/
 ├── scraper.py            # Cookie extraction + HTTP fetch
 ├── parser.py             # HTML parsing + image download
 ├── slide_gen.py          # PPTX generation (python-pptx)
+├── refiner.py            # Optional AI text refinement via local Ollama
 ├── requirements.txt      # Python dependencies
 ├── Template/
 │   └── New Layout.pptx   # Slide template (do not rename or move)
