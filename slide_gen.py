@@ -1,5 +1,6 @@
 import copy
 import math
+import sys
 from io import BytesIO
 from pathlib import Path
 
@@ -12,7 +13,8 @@ from pptx.util import Inches, Emu, Pt
 
 from parser import BugData, ImageStep
 
-TEMPLATE_PATH = Path(__file__).parent / "Template" / "New Layout.pptx"
+_BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+TEMPLATE_PATH = _BASE / "Template" / "New Layout.pptx"
 
 # Fixed image area (EMU) — from Template/1(1).pptx
 _IMG_LEFT = 1181294

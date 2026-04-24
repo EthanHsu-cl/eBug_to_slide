@@ -97,7 +97,7 @@ def save_ollama_model(model: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# NTLM credential storage (macOS Keychain via keyring)
+# NTLM credential storage (macOS Keychain / Windows Credential Manager via keyring)
 # ---------------------------------------------------------------------------
 
 # Sentinel: None = not yet fetched; ("", "") = fetched but user gave nothing
@@ -133,7 +133,7 @@ def _get_ntlm_credentials() -> tuple[str, str] | None:
     _ntlm_prompted = True
     print(
         "\nImage download requires your CyberLink network credentials "
-        "(stored securely in macOS Keychain)."
+        "(stored securely in system credential storage)."
     )
     try:
         username = input("Username (e.g. CYBERLINK\\yourname or yourname@cyberlink.com): ").strip()
@@ -145,7 +145,7 @@ def _get_ntlm_credentials() -> tuple[str, str] | None:
     if username and password:
         keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER_KEY, username)
         keyring.set_password(_KEYRING_SERVICE, username, password)
-        print("Credentials saved to Keychain. You won't be prompted again.\n")
+        print("Credentials saved. You won't be prompted again.\n")
         _ntlm_cache = (username, password)
         return _ntlm_cache
 
@@ -175,7 +175,7 @@ def clear_ntlm_credentials() -> None:
     _ntlm_cache = None
     _ntlm_prompted = False
     _evict_keychain_credentials()
-    print("Credentials cleared from Keychain.")
+    print("Credentials cleared from system credential storage.")
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +258,7 @@ def fetch_bug(bug_code: str, browser: str = "auto") -> tuple[requests.Session, s
 
 def fetch_image(session: requests.Session, url: str, browser: str = "auto") -> bytes:
     """
-    Download an image using NTLM Windows auth (credentials stored in macOS Keychain).
+    Download an image using NTLM Windows auth (credentials stored in system credential storage).
     Falls back to the cookie-authenticated session if NTLM is not needed.
     Raises on failure so the caller can fall back to a local copy.
     """

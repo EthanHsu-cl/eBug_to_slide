@@ -61,7 +61,7 @@ pip install -r requirements.txt
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.10+  (Windows and macOS supported)
 - One of: Brave, Chrome, Edge, Safari, Firefox, Chromium, Opera, or Vivaldi  
   (must be signed in to `ecl.cyberlink.com`)
 
@@ -96,7 +96,7 @@ python main.py PRP265213-0053 --browser brave --save-browser
 # Save raw HTML for debugging if parsing fails
 python main.py PRP265213-0053 --debug
 
-# Remove stored NTLM credentials from macOS Keychain
+# Remove stored NTLM credentials from system credential storage
 python main.py --clear-credentials
 
 # Refine slide text using the default local Ollama model
@@ -151,7 +151,7 @@ python main.py bugs.yaml
 | `--save-output-dir DIR` | | | Save DIR as the default output location (stored in `.env`) |
 | `--browser` | `-b` | `auto` (or saved preference) | Browser to read cookies from |
 | `--save-browser` | | | Persist `--browser` to `.env` for future runs |
-| `--clear-credentials` | | | Remove stored NTLM credentials from macOS Keychain and exit |
+| `--clear-credentials` | | | Remove stored NTLM credentials from system credential storage and exit |
 | `--debug` | | | Save raw HTML to `<bug_code>_debug.html` for inspection |
 | `--ai-refine` | | off | Refine title and section text using a local Ollama model before generating slides |
 | `--ollama-model MODEL` | | saved / `gemma4:e2b-it-q4_K_M` | Ollama model for this run (overrides saved preference) |
@@ -202,16 +202,57 @@ When `--ai-refine` is passed, the tool:
 
 ---
 
+## Packaged executable (GUI)
+
+Running `python main.py` with **no arguments** opens a GUI window — no terminal required.
+
+Double-clicking the built executable (`eBug_to_slide.app` / `eBug_to_slide.exe`) does the same.
+
+### GUI fields
+
+| Field | Description |
+| --- | --- |
+| Bug code | Type a bug code or URL directly |
+| OR .txt file | Browse to a `.txt` list file instead (clears the bug code field) |
+| Output dir | Where `.pptx` files are saved (pre-filled from `.env`) |
+| Browser | Browser to read cookies from (pre-filled from `.env`) |
+
+Output directory and browser choices are saved to `.env` after each successful run.
+
+### Build the executable
+
+**macOS:**
+
+```bash
+./build.sh
+# Output: dist/eBug_to_slide.app
+```
+
+**Windows:**
+
+```batch
+build.bat
+REM Output: dist\eBug_to_slide.exe
+```
+
+> The executable is built in windowed mode (no console window). For CLI use, run `python main.py` directly from a terminal.
+
+---
+
 ## File structure
 
 ```text
 eBug_to_slide/
-├── main.py               # CLI entry point
+├── main.py               # CLI entry point; launches GUI when run with no args
+├── gui.py                # tkinter GUI (launched by main.py when no args given)
 ├── scraper.py            # Cookie extraction + HTTP fetch
 ├── parser.py             # HTML parsing + image download
 ├── slide_gen.py          # PPTX generation (python-pptx)
 ├── refiner.py            # Optional AI text refinement via local Ollama
 ├── requirements.txt      # Python dependencies
+├── eBug_to_slide.spec    # PyInstaller build spec
+├── build.sh              # macOS build script
+├── build.bat             # Windows build script
 ├── Template/
 │   └── New Layout.pptx   # Slide template (do not rename or move)
 └── .env                  # Auto-created; stores preferences and last bug code

@@ -118,6 +118,11 @@ def _run_single(
 
 
 def main() -> None:
+    if len(sys.argv) == 1:
+        from gui import launch_gui
+        launch_gui()
+        return
+
     from scraper import (
         clear_ntlm_credentials,
         load_browser_preference,
@@ -177,7 +182,7 @@ def main() -> None:
     ap.add_argument(
         "--clear-credentials",
         action="store_true",
-        help="Remove stored NTLM credentials from macOS Keychain and exit",
+        help="Remove stored NTLM credentials from system credential storage and exit",
     )
     ap.add_argument(
         "--debug",

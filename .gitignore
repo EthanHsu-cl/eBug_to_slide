@@ -18,4 +18,9 @@ images/
 # macOS metadata
 .DS_Store
 
+# Report outputs
 /Report/
+
+# Build outputs
+/dist/
+/build/

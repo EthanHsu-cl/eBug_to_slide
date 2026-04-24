@@ -1,0 +1,123 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build macOS app
+        run: pyinstaller eBug_to_slide.spec --clean
+
+      - name: Create zip archive
+        working-directory: dist
+        run: zip -r "../eBug_to_slide-macOS.zip" "eBug_to_slide.app"
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eBug_to_slide-macOS
+          path: eBug_to_slide-macOS.zip
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build Windows exe
+        run: pyinstaller eBug_to_slide.spec --clean
+
+      - name: Create zip archive
+        run: Compress-Archive -Path dist\eBug_to_slide -DestinationPath eBug_to_slide-Windows.zip
+        shell: pwsh
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eBug_to_slide-Windows
+          path: eBug_to_slide-Windows.zip
+
+  create-release:
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get tag info
+        id: tag_info
+        run: |
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "tag_name=$TAG_NAME" >> "$GITHUB_OUTPUT"
+
+          git fetch origin "refs/tags/$TAG_NAME:refs/tags/$TAG_NAME" --force
+
+          TAG_MESSAGE=$(git tag -l --format='%(contents)' "$TAG_NAME")
+          TAG_BODY=$(echo "$TAG_MESSAGE" | tail -n +2 | sed '/^$/N;/^\n$/d;s/^\n//')
+
+          if [ -z "$TAG_BODY" ]; then
+            TAG_BODY="$TAG_MESSAGE"
+          fi
+
+          {
+            echo "tag_body<<ENDOFTAGBODY"
+            echo "$TAG_BODY"
+            echo "ENDOFTAGBODY"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: eBug_to_slide-macOS
+          path: ./artifacts
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: eBug_to_slide-Windows
+          path: ./artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag_info.outputs.tag_name }}
+          name: Release ${{ steps.tag_info.outputs.tag_name }}
+          body: ${{ steps.tag_info.outputs.tag_body }}
+          generate_release_notes: false
+          files: |
+            ./artifacts/eBug_to_slide-macOS.zip
+            ./artifacts/eBug_to_slide-Windows.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
