@@ -101,6 +101,14 @@ def save_ollama_model(model: str) -> None:
     _env_set("EBUG_OLLAMA_MODEL", model)
 
 
+def load_cookies_string() -> str:
+    return _env_get("EBUG_COOKIES", "")
+
+
+def save_cookies_string(cookies: str) -> None:
+    _env_set("EBUG_COOKIES", cookies)
+
+
 # ---------------------------------------------------------------------------
 # NTLM credential storage (macOS Keychain / Windows Credential Manager via keyring)
 # ---------------------------------------------------------------------------
@@ -187,6 +195,17 @@ def clear_ntlm_credentials() -> None:
 # Cookie extraction
 # ---------------------------------------------------------------------------
 
+def _parse_cookie_string(cookie_str: str) -> "requests.cookies.RequestsCookieJar":
+    """Parse a semicolon-separated Cookie header value into a RequestsCookieJar."""
+    cj = requests.cookies.RequestsCookieJar()
+    for part in cookie_str.split(";"):
+        part = part.strip()
+        if "=" in part:
+            name, _, value = part.partition("=")
+            cj.set(name.strip(), value.strip(), domain=".cyberlink.com", path="/")
+    return cj
+
+
 def _try_browser(name: str) -> "tuple[requests.cookies.RequestsCookieJar | None, str | None]":
     """Return (cookie_jar, None) on success or (None, reason) on failure."""
     loader = getattr(browser_cookie3, name, None)
@@ -203,6 +222,12 @@ def _try_browser(name: str) -> "tuple[requests.cookies.RequestsCookieJar | None,
 
 def get_cookies(browser: str = "auto") -> "requests.cookies.RequestsCookieJar":
     """Return a CookieJar for ecl.cyberlink.com from the user's browser."""
+    # Manual cookie string takes priority — useful on Windows where browser
+    # extraction is blocked by encryption or missing profiles.
+    cookie_str = load_cookies_string()
+    if cookie_str:
+        return _parse_cookie_string(cookie_str)
+
     candidates = AUTO_ORDER if browser == "auto" else [browser]
     errors: list[str] = []
     for name in candidates:
@@ -215,8 +240,10 @@ def get_cookies(browser: str = "auto") -> "requests.cookies.RequestsCookieJar":
     detail = "\n".join(errors)
     windows_hint = (
         "\nNote: Chrome and Edge 127+ on Windows use app-bound encryption that blocks\n"
-        "cookie extraction. Log into https://ecl.cyberlink.com in Firefox or Brave\n"
-        "and select that browser in the dropdown."
+        "cookie extraction. As a workaround, copy the Cookie header from browser devtools\n"
+        "(Network tab → any ecl.cyberlink.com request → Request Headers → Cookie)\n"
+        "and paste it into the 'Cookie string' field in the GUI, or use --cookies \"...\" on\n"
+        "the command line."
         if sys.platform == "win32" else ""
     )
     print(

@@ -9,9 +9,11 @@ def launch_gui() -> None:
     """Launch the GUI. Called from main.py when no CLI arguments are given."""
     from scraper import (
         load_browser_preference,
+        load_cookies_string,
         load_last_bug_code,
         load_output_dir,
         save_browser_preference,
+        save_cookies_string,
         save_last_bug_code,
         save_output_dir,
     )
@@ -78,15 +80,29 @@ def launch_gui() -> None:
         state="readonly", width=16,
     ).grid(row=3, column=1, sticky="w", **pad)
 
+    # ── Cookie string (Windows fallback) ──────────────────────────────────────
+    tk.Label(root, text="Cookie string:").grid(row=4, column=0, sticky="e", **pad)
+    cookie_var = tk.StringVar(value=load_cookies_string())
+    tk.Entry(root, textvariable=cookie_var, width=30).grid(
+        row=4, column=1, sticky="w", **pad
+    )
+
+    def clear_cookies() -> None:
+        cookie_var.set("")
+
+    tk.Button(root, text="Clear", command=clear_cookies).grid(
+        row=4, column=2, sticky="w", **pad
+    )
+
     # ── Generate button ───────────────────────────────────────────────────────
     gen_btn = tk.Button(root, text="Generate Slides", width=20)
-    gen_btn.grid(row=4, column=0, columnspan=3, pady=8)
+    gen_btn.grid(row=5, column=0, columnspan=3, pady=8)
 
     # ── Log area ──────────────────────────────────────────────────────────────
     log = scrolledtext.ScrolledText(
         root, height=12, width=58, state="disabled", wrap="word"
     )
-    log.grid(row=5, column=0, columnspan=3, padx=8, pady=(0, 8))
+    log.grid(row=6, column=0, columnspan=3, padx=8, pady=(0, 8))
     log.tag_config("err", foreground="red")
 
     def _log(text: str, tag: str = "") -> None:
@@ -118,6 +134,7 @@ def launch_gui() -> None:
         file_path = file_var.get().strip()
         out_dir = outdir_var.get().strip() or "."
         browser = browser_var.get()
+        cookie_str = cookie_var.get().strip()
 
         if not code and not file_path:
             _log("Error: enter a bug code or select a .txt file.", "err")
@@ -133,6 +150,7 @@ def launch_gui() -> None:
             try:
                 save_output_dir(out_dir)
                 save_browser_preference(browser)
+                save_cookies_string(cookie_str)
                 if file_path:
                     codes = _load_bug_codes_from_file(file_path)
                     for c in codes:

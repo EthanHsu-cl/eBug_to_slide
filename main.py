@@ -130,6 +130,7 @@ def main() -> None:
         load_ollama_model,
         load_output_dir,
         save_browser_preference,
+        save_cookies_string,
         save_last_bug_code,
         save_ollama_model,
         save_output_dir,
@@ -180,6 +181,17 @@ def main() -> None:
         help="Save --browser as the default for future runs (stored in .env)",
     )
     ap.add_argument(
+        "--cookies",
+        metavar="COOKIE_STRING",
+        default=None,
+        help=(
+            "Semicolon-separated cookie string copied from browser devtools "
+            "(Network tab → any ecl.cyberlink.com request → Cookie header). "
+            "Saved to .env as EBUG_COOKIES for future runs. "
+            "Pass an empty string to clear: --cookies \"\""
+        ),
+    )
+    ap.add_argument(
         "--clear-credentials",
         action="store_true",
         help="Remove stored NTLM credentials from system credential storage and exit",
@@ -216,6 +228,13 @@ def main() -> None:
         return
 
     # --- Persist preferences ---
+    if args.cookies is not None:
+        save_cookies_string(args.cookies)
+        if args.cookies:
+            print("Cookie string saved to .env (EBUG_COOKIES).")
+        else:
+            print("Cookie string cleared from .env.")
+
     if args.save_browser and args.browser != "auto":
         save_browser_preference(args.browser)
         print(f"Browser preference saved: {args.browser}")

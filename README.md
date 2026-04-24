@@ -151,6 +151,7 @@ python main.py bugs.yaml
 | `--save-output-dir DIR` | | | Save DIR as the default output location (stored in `.env`) |
 | `--browser` | `-b` | `auto` (or saved preference) | Browser to read cookies from |
 | `--save-browser` | | | Persist `--browser` to `.env` for future runs |
+| `--cookies "..."` | | | Semicolon-separated cookie string (bypasses browser extraction; saved to `.env`) |
 | `--clear-credentials` | | | Remove stored NTLM credentials from system credential storage and exit |
 | `--debug` | | | Save raw HTML to `<bug_code>_debug.html` for inspection |
 | `--ai-refine` | | off | Refine title and section text using a local Ollama model before generating slides |
@@ -163,7 +164,7 @@ python main.py bugs.yaml
 
 **Windows:** `brave` → `chrome` → `edge` → `firefox`
 
-> **Windows note:** Chrome and Edge 127+ use app-bound encryption that prevents cookie extraction. If auto-detection fails, log into **Firefox** or **Brave** at `https://ecl.cyberlink.com` and select that browser in the dropdown (or pass `--browser firefox`).
+> **Windows note:** Chrome and Edge 127+ use app-bound encryption that prevents cookie extraction. Brave may require admin rights. If all browsers fail, use the **cookie string fallback** — see [Troubleshooting](#troubleshooting) below.
 
 Use `--save-browser` to set a permanent default and skip detection entirely.
 
@@ -179,6 +180,7 @@ Defaults are stored in `.env` next to `main.py`. You can edit this file directly
 | `EBUG_OUTPUT_DIR` | `--save-output-dir` | Default output directory |
 | `EBUG_LAST_BUG_CODE` | auto-saved | Last successfully processed bug code; used when no argument is given |
 | `EBUG_OLLAMA_MODEL` | `--set-ollama-model` | Default Ollama model used by `--ai-refine` |
+| `EBUG_COOKIES` | `--cookies` / GUI field | Manual cookie string; bypasses browser extraction when set |
 
 ---
 
@@ -220,8 +222,9 @@ Double-clicking the built executable (`eBug_to_slide.app` / `eBug_to_slide.exe`)
 | OR .txt file | Browse to a `.txt` list file instead (clears the bug code field) |
 | Output dir | Where `.pptx` files are saved (pre-filled from `.env`) |
 | Browser | Browser to read cookies from (pre-filled from `.env`) |
+| Cookie string | Manual cookie fallback — paste the `Cookie:` header value here (see Windows note below) |
 
-Output directory and browser choices are saved to `.env` after each successful run.
+All fields are saved to `.env` when Generate is clicked. Use the **Clear** button next to Cookie string to remove a saved value.
 
 ### Build the executable
 
@@ -266,8 +269,22 @@ eBug_to_slide/
 
 ## Troubleshooting
 
-**"Could not extract cookies from any browser"**  
+**"Could not extract cookies from any browser" (especially on Windows)**  
 Log into `https://ecl.cyberlink.com` in your browser, then retry. Use `--browser <name>` to target a specific browser.
+
+If all browsers fail (common on Windows due to Chrome/Edge app-bound encryption or Brave requiring admin), use the **cookie string fallback**:
+
+1. Open your browser and log into `https://ecl.cyberlink.com`
+2. Open DevTools (F12) → **Network** tab
+3. Reload the page, then click any request to `ecl.cyberlink.com`
+4. In **Request Headers**, find the `Cookie:` line and copy its full value
+5. Paste it into the **Cookie string** field in the GUI, or pass it via CLI:
+
+   ```bash
+   python main.py PRP265213-0053 --cookies "ASP.NET_SessionId=abc123; .ASPXAUTH=xyz..."
+   ```
+
+   The value is saved to `.env` (as `EBUG_COOKIES`) so you only need to do this once per session.
 
 **"Redirected to login page"**  
 Your session has expired. Log in again in the browser.
