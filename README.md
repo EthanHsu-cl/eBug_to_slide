@@ -163,7 +163,7 @@ python main.py bugs.yaml
 
 **Windows:** `brave` → `chrome` → `edge` → `firefox`
 
-> **Windows note:** Chrome 127+ uses app-bound encryption that prevents cookie extraction. If auto-detection fails with Chrome, log into Edge or Firefox and re-run — or explicitly pass `--browser edge`.
+> **Windows note:** Chrome and Edge 127+ use app-bound encryption that prevents cookie extraction. If auto-detection fails, log into **Firefox** or **Brave** at `https://ecl.cyberlink.com` and select that browser in the dropdown (or pass `--browser firefox`).
 
 Use `--save-browser` to set a permanent default and skip detection entirely.
 

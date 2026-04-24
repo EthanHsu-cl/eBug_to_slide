@@ -214,8 +214,9 @@ def get_cookies(browser: str = "auto") -> "requests.cookies.RequestsCookieJar":
 
     detail = "\n".join(errors)
     windows_hint = (
-        "\nNote: Chrome 127+ on Windows uses app-bound encryption that blocks cookie\n"
-        "extraction. Try using Edge or Firefox instead and log in there."
+        "\nNote: Chrome and Edge 127+ on Windows use app-bound encryption that blocks\n"
+        "cookie extraction. Log into https://ecl.cyberlink.com in Firefox or Brave\n"
+        "and select that browser in the dropdown."
         if sys.platform == "win32" else ""
     )
     print(
