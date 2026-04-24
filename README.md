@@ -159,7 +159,11 @@ python main.py bugs.yaml
 
 ### Browser auto-detection order
 
-`brave` → `chrome` → `edge` → `safari`
+**macOS:** `brave` → `chrome` → `edge` → `safari`
+
+**Windows:** `brave` → `chrome` → `edge` → `firefox`
+
+> **Windows note:** Chrome 127+ uses app-bound encryption that prevents cookie extraction. If auto-detection fails with Chrome, log into Edge or Firefox and re-run — or explicitly pass `--browser edge`.
 
 Use `--save-browser` to set a permanent default and skip detection entirely.
 

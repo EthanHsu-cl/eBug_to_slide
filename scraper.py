@@ -14,7 +14,12 @@ ENV_PATH = Path(__file__).parent / ".env"
 
 # All browsers supported by browser-cookie3
 SUPPORTED_BROWSERS = ["brave", "chrome", "edge", "safari", "firefox", "chromium", "opera", "vivaldi"]
-AUTO_ORDER = ["brave", "chrome", "edge", "safari"]
+# On Windows, Chrome 127+ uses app-bound encryption that browser_cookie3 cannot read.
+# Edge and Firefox use schemes that are still accessible, so prefer them on Windows.
+if sys.platform == "win32":
+    AUTO_ORDER = ["brave", "chrome", "edge", "firefox"]
+else:
+    AUTO_ORDER = ["brave", "chrome", "edge", "safari"]
 
 _KEYRING_SERVICE = "eBug-to-slide"
 _KEYRING_USER_KEY = "_ntlm_username"
@@ -182,31 +187,42 @@ def clear_ntlm_credentials() -> None:
 # Cookie extraction
 # ---------------------------------------------------------------------------
 
-def _try_browser(name: str) -> "requests.cookies.RequestsCookieJar | None":
+def _try_browser(name: str) -> "tuple[requests.cookies.RequestsCookieJar | None, str | None]":
+    """Return (cookie_jar, None) on success or (None, reason) on failure."""
     loader = getattr(browser_cookie3, name, None)
     if loader is None:
-        return None
+        return None, f"{name}: not supported by browser_cookie3"
     try:
         cj = loader(domain_name=DOMAIN)
         if any(True for _ in cj):
-            return cj
-    except Exception:
-        pass
-    return None
+            return cj, None
+        return None, f"{name}: no cookies found for {DOMAIN} (are you logged in?)"
+    except Exception as exc:
+        return None, f"{name}: {exc}"
 
 
 def get_cookies(browser: str = "auto") -> "requests.cookies.RequestsCookieJar":
     """Return a CookieJar for ecl.cyberlink.com from the user's browser."""
     candidates = AUTO_ORDER if browser == "auto" else [browser]
+    errors: list[str] = []
     for name in candidates:
-        cj = _try_browser(name)
+        cj, err = _try_browser(name)
         if cj is not None:
             return cj
+        if err:
+            errors.append(f"  {err}")
 
+    detail = "\n".join(errors)
+    windows_hint = (
+        "\nNote: Chrome 127+ on Windows uses app-bound encryption that blocks cookie\n"
+        "extraction. Try using Edge or Firefox instead and log in there."
+        if sys.platform == "win32" else ""
+    )
     print(
-        "ERROR: Could not extract cookies for ecl.cyberlink.com from any browser.\n"
-        f"Tried: {', '.join(candidates)}\n"
-        "Make sure you are logged in at https://ecl.cyberlink.com in one of those browsers.",
+        f"ERROR: Could not extract cookies for ecl.cyberlink.com from any browser.\n"
+        f"{detail}\n"
+        f"Make sure you are logged in at https://ecl.cyberlink.com in one of those browsers."
+        f"{windows_hint}",
         file=sys.stderr,
     )
     sys.exit(1)
