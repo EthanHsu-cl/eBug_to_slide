@@ -248,14 +248,8 @@ def _update_slide(
     _insert_image(slide, step.image_data)
 
 
-def generate(bug_data: BugData, output_path: str) -> None:
-    """Generate a PPTX at output_path — one slide per ImageStep."""
-    prs = Presentation(str(TEMPLATE_PATH))
-    n_template_slides = len(prs.slides)
-
-    layout = _find_layout(prs, "1_只有標題 (no BK)")
-    template_slide = prs.slides[0]
-
+def _add_bug_slides(prs, template_slide, layout, bug_data: "BugData") -> int:
+    """Add all slides for one bug to an open presentation. Returns the slide count."""
     steps = list(bug_data.image_steps)
     if not any(s.img_type == "Reference" for s in steps):
         insert_at = next(
@@ -265,12 +259,32 @@ def generate(bug_data: BugData, output_path: str) -> None:
         steps.insert(insert_at, ImageStep(
             step_num=1, text="", img_type="Reference", image_file="", image_data=b"",
         ))
-
     for step in steps:
         new_slide = prs.slides.add_slide(layout)
         _clone_slide_shapes(template_slide, new_slide)
         _update_slide(new_slide, step, bug_data.title, bug_data.version_info, bug_data.section_texts)
+    return len(steps)
 
+
+def generate(bug_data: BugData, output_path: str) -> None:
+    """Generate a PPTX at output_path — one slide per ImageStep."""
+    prs = Presentation(str(TEMPLATE_PATH))
+    n_template_slides = len(prs.slides)
+    layout = _find_layout(prs, "1_只有標題 (no BK)")
+    template_slide = prs.slides[0]
+    n = _add_bug_slides(prs, template_slide, layout, bug_data)
     _remove_template_slides(prs, n_template_slides)
     prs.save(output_path)
-    print(f"Saved: {output_path}  ({len(steps)} slide(s))")
+    print(f"Saved: {output_path}  ({n} slide(s))")
+
+
+def generate_combined(bug_data_list: "list[BugData]", output_path: str) -> None:
+    """Generate a single PPTX containing slides from all bugs in bug_data_list."""
+    prs = Presentation(str(TEMPLATE_PATH))
+    n_template_slides = len(prs.slides)
+    layout = _find_layout(prs, "1_只有標題 (no BK)")
+    template_slide = prs.slides[0]
+    total = sum(_add_bug_slides(prs, template_slide, layout, bd) for bd in bug_data_list)
+    _remove_template_slides(prs, n_template_slides)
+    prs.save(output_path)
+    print(f"Saved: {output_path}  ({total} slide(s) from {len(bug_data_list)} bug(s))")

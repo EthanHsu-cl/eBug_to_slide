@@ -109,18 +109,44 @@ python main.py PRP265213-0053 --ai-refine --ollama-model gemma3:latest
 python main.py --set-ollama-model gemma3:latest
 ```
 
-### Batch processing
+### Multiple bug codes
 
-Pass a file containing multiple bug codes to process them all in one run.  
-Each bug produces its own `.pptx` in the configured output directory.
+When more than one bug code is given, all bugs are combined into **one `.pptx`** by default.  
+Use `--separate` to generate an individual file for each code instead.
 
-**`.txt`** — one bug code per line (`#` lines are ignored):
+**Directly on the command line** (space-separated or comma-separated in quotes):
+
+```bash
+# Space-separated — shell passes each code as a separate argument
+python main.py PRP265213-0053 PRP265213-0054 PRP265213-0055
+
+# Comma-separated inside quotes — the tool splits on commas
+python main.py "PRP265213-0053, PRP265213-0054, PRP265213-0055"
+
+# Separate files instead of one combined file
+python main.py PRP265213-0053 PRP265213-0054 --separate
+```
+
+**Via a list file** — pass any of the supported file formats:
+
+```bash
+python main.py bugs.txt
+python main.py bugs.json
+python main.py bugs.yaml
+```
+
+**`.txt`** — flexible format; all of the following work and can be mixed:
 
 ```text
-# Sprint 42
+# one per line
 PRP265213-0053
 PRP265213-0054
-PRP265213-0055
+
+# comma-separated on one line
+PRP265213-0055, PRP265213-0056
+
+# space-separated on one line
+PRP265213-0057 PRP265213-0058
 ```
 
 **`.json`** — top-level array:
@@ -137,17 +163,19 @@ PRP265213-0055
 - PRP265213-0055
 ```
 
-```bash
-python main.py bugs.txt
-python main.py bugs.json
-python main.py bugs.yaml
-```
+**Combined output filename** (when not using `--output`):
+
+| Input | Default filename |
+| --- | --- |
+| 2–3 codes | `BUG1_BUG2_BUG3.pptx` |
+| 4+ codes | `BUG1_and_3_more.pptx` |
 
 ### Options
 
 | Flag | Short | Default | Description |
 | --- | --- | --- | --- |
-| `--output` | `-o` | `<EBUG_OUTPUT_DIR>/<bug_code>.pptx` | Output file path (single bug only) |
+| `--output` | `-o` | `<EBUG_OUTPUT_DIR>/<name>.pptx` | Output file path |
+| `--separate` | | | Generate one `.pptx` per bug code (default for multiple: combine into one file) |
 | `--save-output-dir DIR` | | | Save DIR as the default output location (stored in `.env`) |
 | `--browser` | `-b` | `auto` (or saved preference) | Browser to read cookies from |
 | `--save-browser` | | | Persist `--browser` to `.env` for future runs |
@@ -218,13 +246,14 @@ Double-clicking the built executable (`eBug_to_slide.app` / `eBug_to_slide.exe`)
 
 | Field | Description |
 | --- | --- |
-| Bug code | Type a bug code or URL directly |
-| OR .txt file | Browse to a `.txt` list file instead (clears the bug code field) |
+| Bug code(s) | Type one or more bug codes or URLs — comma- or space-separated for multiple |
+| OR .txt file | Browse to a list file instead (clears the bug code field); supports flexible `.txt` formats |
 | Output dir | Where `.pptx` files are saved (pre-filled from `.env`) |
 | Browser | Browser to read cookies from (pre-filled from `.env`) |
 | Cookie string | Manual cookie fallback — paste the `Cookie:` header value here (see Windows note below) |
 | Win username | CyberLink domain username for image auth (e.g. `CYBERLINK\yourname`) — saved to Windows Credential Manager |
 | Win password | Domain password — saved to Windows Credential Manager after first successful auth |
+| Combine into one file | When checked (default), multiple bug codes are combined into one `.pptx`; uncheck for one file per bug |
 
 All fields are saved when Generate is clicked. Use the **Clear** buttons to remove saved values.
 

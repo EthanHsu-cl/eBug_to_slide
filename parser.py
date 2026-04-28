@@ -215,6 +215,7 @@ def parse(
     browser: str = "auto",
 ) -> BugData:
     if debug_html_path:
+        Path(debug_html_path).parent.mkdir(parents=True, exist_ok=True)
         with open(debug_html_path, "w", encoding="utf-8") as fh:
             fh.write(html)
 
@@ -226,15 +227,18 @@ def parse(
 
     repro_text, repro_raw = _find_repro_text(soup)
     if not repro_text:
-        debug_path = debug_html_path or f"{bug_code}_debug.html"
-        print(
-            f"WARNING: Could not find repro steps.\n"
-            f"Raw HTML saved to {debug_path} for inspection.",
-            file=sys.stderr,
-        )
-        if not debug_html_path:
-            with open(debug_path, "w", encoding="utf-8") as fh:
-                fh.write(html)
+        if debug_html_path:
+            print(
+                f"WARNING: Could not find repro steps.\n"
+                f"Raw HTML saved to {debug_html_path} for inspection.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"WARNING: Could not find repro steps for {bug_code}.\n"
+                f"Run with --debug to save the raw HTML for inspection.",
+                file=sys.stderr,
+            )
         return BugData(code=bug_code, title=title,
                        version_info=version_info, image_steps=[])
 

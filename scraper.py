@@ -116,6 +116,7 @@ def save_cookies_string(cookies: str) -> None:
 # Sentinel: None = not yet fetched; ("", "") = fetched but user gave nothing
 _ntlm_cache: tuple[str, str] | None = None
 _ntlm_prompted: bool = False   # true once we've shown the prompt this run
+_ntlm_needs_persist: bool = False  # true only for GUI-supplied creds not yet in keyring
 
 
 def _get_ntlm_credentials() -> tuple[str, str] | None:
@@ -190,9 +191,10 @@ def _evict_keychain_credentials() -> None:
 
 def clear_ntlm_credentials() -> None:
     """Remove stored NTLM credentials from Keychain and in-process cache."""
-    global _ntlm_cache, _ntlm_prompted
+    global _ntlm_cache, _ntlm_prompted, _ntlm_needs_persist
     _ntlm_cache = None
     _ntlm_prompted = False
+    _ntlm_needs_persist = False
     _evict_keychain_credentials()
     print("Credentials cleared from system credential storage.")
 
@@ -215,11 +217,13 @@ def set_ntlm_credentials(username: str, password: str) -> None:
     Calling with both empty means 'nothing entered — let keyring auto-load handle it'.
     Calling with only one empty means 'incomplete — suppress auth this run'.
     """
-    global _ntlm_cache
+    global _ntlm_cache, _ntlm_needs_persist
     if username and password:
         _ntlm_cache = (username, password)
+        _ntlm_needs_persist = True   # not yet in keyring; save after confirmed auth
     else:
-        _ntlm_cache = None  # let _get_ntlm_credentials() check keyring normally
+        _ntlm_cache = None           # let _get_ntlm_credentials() check keyring normally
+        _ntlm_needs_persist = False
 
 
 # ---------------------------------------------------------------------------
@@ -391,11 +395,17 @@ def fetch_image(session: requests.Session, url: str, browser: str = "auto") -> b
         )
         raise RuntimeError("NTLM auth failed")
     resp.raise_for_status()
-    # Auth confirmed — safe to persist credentials now.
-    try:
-        import keyring
-        keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER_KEY, username)
-        keyring.set_password(_KEYRING_SERVICE, username, password)
-    except Exception:
-        pass
+    # Persist credentials to keyring only when they came from the GUI (not already
+    # stored). CLI credentials are saved immediately in _get_ntlm_credentials, and
+    # keyring-loaded credentials are already there — re-writing them triggers extra
+    # macOS Keychain prompts with no benefit.
+    global _ntlm_needs_persist
+    if _ntlm_needs_persist:
+        try:
+            import keyring
+            keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER_KEY, username)
+            keyring.set_password(_KEYRING_SERVICE, username, password)
+            _ntlm_needs_persist = False
+        except Exception:
+            pass
     return resp.content

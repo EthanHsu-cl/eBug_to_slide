@@ -20,7 +20,14 @@ def launch_gui() -> None:
         save_output_dir,
         set_ntlm_credentials,
     )
-    from main import _load_bug_codes_from_file, _parse_bug_code, _resolve_output, _run_single
+    from main import (
+        _combined_filename,
+        _load_bug_codes_from_file,
+        _parse_bug_codes_from_string,
+        _resolve_output,
+        _run_combined,
+        _run_single,
+    )
 
     root = tk.Tk()
     root.title("eBug to Slide")
@@ -28,18 +35,21 @@ def launch_gui() -> None:
 
     pad = {"padx": 8, "pady": 4}
 
-    # ── Bug code ──────────────────────────────────────────────────────────────
-    tk.Label(root, text="Bug code:").grid(row=0, column=0, sticky="e", **pad)
+    # ── Bug code(s) ───────────────────────────────────────────────────────────
+    tk.Label(root, text="Bug code(s):").grid(row=0, column=0, sticky="e", **pad)
     bug_var = tk.StringVar(value=load_last_bug_code())
     tk.Entry(root, textvariable=bug_var, width=38).grid(
         row=0, column=1, columnspan=2, sticky="w", **pad
     )
+    tk.Label(
+        root, text="comma- or space-separated for multiple", fg="#888", font=("", 8),
+    ).grid(row=1, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=0)
 
     # ── .txt file ─────────────────────────────────────────────────────────────
-    tk.Label(root, text="OR .txt file:").grid(row=1, column=0, sticky="e", **pad)
+    tk.Label(root, text="OR .txt file:").grid(row=2, column=0, sticky="e", **pad)
     file_var = tk.StringVar()
     tk.Label(root, textvariable=file_var, fg="#555", width=30, anchor="w").grid(
-        row=1, column=1, sticky="w", **pad
+        row=2, column=1, sticky="w", **pad
     )
 
     def browse_file() -> None:
@@ -52,14 +62,14 @@ def launch_gui() -> None:
             bug_var.set("")
 
     tk.Button(root, text="Browse…", command=browse_file).grid(
-        row=1, column=2, sticky="w", **pad
+        row=2, column=2, sticky="w", **pad
     )
 
     # ── Output directory ──────────────────────────────────────────────────────
-    tk.Label(root, text="Output dir:").grid(row=2, column=0, sticky="e", **pad)
+    tk.Label(root, text="Output dir:").grid(row=3, column=0, sticky="e", **pad)
     outdir_var = tk.StringVar(value=load_output_dir() or ".")
     tk.Label(root, textvariable=outdir_var, fg="#555", width=30, anchor="w").grid(
-        row=2, column=1, sticky="w", **pad
+        row=3, column=1, sticky="w", **pad
     )
 
     def browse_outdir() -> None:
@@ -68,11 +78,11 @@ def launch_gui() -> None:
             outdir_var.set(path)
 
     tk.Button(root, text="Browse…", command=browse_outdir).grid(
-        row=2, column=2, sticky="w", **pad
+        row=3, column=2, sticky="w", **pad
     )
 
     # ── Browser ───────────────────────────────────────────────────────────────
-    tk.Label(root, text="Browser:").grid(row=3, column=0, sticky="e", **pad)
+    tk.Label(root, text="Browser:").grid(row=4, column=0, sticky="e", **pad)
     browser_choices = [
         "auto", "brave", "chrome", "edge", "safari",
         "firefox", "chromium", "opera", "vivaldi",
@@ -81,33 +91,33 @@ def launch_gui() -> None:
     ttk.Combobox(
         root, textvariable=browser_var, values=browser_choices,
         state="readonly", width=16,
-    ).grid(row=3, column=1, sticky="w", **pad)
+    ).grid(row=4, column=1, sticky="w", **pad)
 
     # ── Cookie string (Windows fallback) ──────────────────────────────────────
-    tk.Label(root, text="Cookie string:").grid(row=4, column=0, sticky="e", **pad)
+    tk.Label(root, text="Cookie string:").grid(row=5, column=0, sticky="e", **pad)
     cookie_var = tk.StringVar(value=load_cookies_string())
     tk.Entry(root, textvariable=cookie_var, width=30).grid(
-        row=4, column=1, sticky="w", **pad
+        row=5, column=1, sticky="w", **pad
     )
 
     def clear_cookies() -> None:
         cookie_var.set("")
 
     tk.Button(root, text="Clear", command=clear_cookies).grid(
-        row=4, column=2, sticky="w", **pad
+        row=5, column=2, sticky="w", **pad
     )
 
     # ── Windows NTLM credentials (image auth fallback) ────────────────────────
-    tk.Label(root, text="Win username:").grid(row=5, column=0, sticky="e", **pad)
+    tk.Label(root, text="Win username:").grid(row=6, column=0, sticky="e", **pad)
     ntlm_user_var = tk.StringVar(value=load_ntlm_username())
     tk.Entry(root, textvariable=ntlm_user_var, width=30).grid(
-        row=5, column=1, sticky="w", **pad
+        row=6, column=1, sticky="w", **pad
     )
 
-    tk.Label(root, text="Win password:").grid(row=6, column=0, sticky="e", **pad)
+    tk.Label(root, text="Win password:").grid(row=7, column=0, sticky="e", **pad)
     ntlm_pass_var = tk.StringVar()
     tk.Entry(root, textvariable=ntlm_pass_var, width=30, show="*").grid(
-        row=6, column=1, sticky="w", **pad
+        row=7, column=1, sticky="w", **pad
     )
 
     def clear_creds() -> None:
@@ -116,18 +126,24 @@ def launch_gui() -> None:
         clear_ntlm_credentials()
 
     tk.Button(root, text="Clear", command=clear_creds).grid(
-        row=5, column=2, sticky="w", **pad
+        row=6, column=2, sticky="w", **pad
     )
+
+    # ── Combine checkbox ──────────────────────────────────────────────────────
+    combine_var = tk.BooleanVar(value=True)
+    tk.Checkbutton(
+        root, text="Combine multiple bugs into one file", variable=combine_var,
+    ).grid(row=8, column=0, columnspan=3, sticky="w", padx=8, pady=(2, 0))
 
     # ── Generate button ───────────────────────────────────────────────────────
     gen_btn = tk.Button(root, text="Generate Slides", width=20)
-    gen_btn.grid(row=7, column=0, columnspan=3, pady=8)
+    gen_btn.grid(row=9, column=0, columnspan=3, pady=8)
 
     # ── Log area ──────────────────────────────────────────────────────────────
     log = scrolledtext.ScrolledText(
         root, height=12, width=58, state="disabled", wrap="word"
     )
-    log.grid(row=8, column=0, columnspan=3, padx=8, pady=(0, 8))
+    log.grid(row=10, column=0, columnspan=3, padx=8, pady=(0, 8))
     log.tag_config("err", foreground="red")
 
     def _log(text: str, tag: str = "") -> None:
@@ -160,6 +176,7 @@ def launch_gui() -> None:
         out_dir = outdir_var.get().strip() or "."
         browser = browser_var.get()
         cookie_str = cookie_var.get().strip()
+        combine = combine_var.get()
 
         if not code and not file_path:
             _log("Error: enter a bug code or select a .txt file.", "err")
@@ -181,19 +198,28 @@ def launch_gui() -> None:
                 save_output_dir(out_dir)
                 save_browser_preference(browser)
                 save_cookies_string(cookie_str)
-                if file_path:
-                    codes = _load_bug_codes_from_file(file_path)
+
+                codes = (
+                    _load_bug_codes_from_file(file_path)
+                    if file_path
+                    else _parse_bug_codes_from_string(code)
+                )
+                if not codes:
+                    root.after(0, _log, "Error: no bug codes found.", "err")
+                    return
+
+                if combine and len(codes) > 1:
+                    name = _combined_filename(codes)
+                    out = _resolve_output(None, name, out_dir)
+                    ok = _run_combined(codes, out, browser, False)
+                    if ok:
+                        save_last_bug_code(codes[-1])
+                else:
                     for c in codes:
                         out = _resolve_output(None, c, out_dir)
                         ok = _run_single(c, out, browser, False)
                         if ok:
                             save_last_bug_code(c)
-                else:
-                    bug_code = _parse_bug_code(code)
-                    out = _resolve_output(None, bug_code, out_dir)
-                    ok = _run_single(bug_code, out, browser, False)
-                    if ok:
-                        save_last_bug_code(bug_code)
             except Exception as exc:
                 root.after(0, _log, f"Error: {exc}", "err")
             finally:
