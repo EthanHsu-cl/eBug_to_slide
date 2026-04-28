@@ -1,6 +1,7 @@
 python-pptx
 requests
 requests-ntlm
+requests-negotiate-sspi; sys_platform == "win32"
 keyring
 beautifulsoup4
 browser-cookie3

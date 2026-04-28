@@ -20,6 +20,7 @@ a = Analysis(
         "keyring.backends.SecretService",
         "keyring.backends.fail",
         "requests_ntlm",
+        "requests_negotiate_sspi",
         "lxml._elementpath",
         "PIL._tkinter_finder",
         "tkinter",

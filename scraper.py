@@ -122,25 +122,27 @@ def _get_ntlm_credentials() -> tuple[str, str] | None:
     """
     Return (username, password) or None if no credentials are available.
     - Prompts at most once per run (in-process cache).
-    - Persists to macOS Keychain so subsequent runs skip the prompt entirely.
+    - Persists to system credential storage so subsequent runs skip the prompt.
     - Returns None if the user left the prompt blank, suppressing NTLM for
       the rest of the run without re-prompting.
     """
-    import keyring
-
     global _ntlm_cache, _ntlm_prompted
 
     # Return cached result (even if ("", "")) so we never prompt twice.
     if _ntlm_cache is not None:
         return _ntlm_cache if all(_ntlm_cache) else None
 
-    # Try Keychain first.
-    username = keyring.get_password(_KEYRING_SERVICE, _KEYRING_USER_KEY)
-    if username:
-        password = keyring.get_password(_KEYRING_SERVICE, username)
-        if password:
-            _ntlm_cache = (username, password)
-            return _ntlm_cache
+    # Try credential storage first.
+    try:
+        import keyring
+        username = keyring.get_password(_KEYRING_SERVICE, _KEYRING_USER_KEY)
+        if username:
+            password = keyring.get_password(_KEYRING_SERVICE, username)
+            if password:
+                _ntlm_cache = (username, password)
+                return _ntlm_cache
+    except Exception:
+        pass
 
     # Prompt once.
     _ntlm_prompted = True
@@ -151,14 +153,18 @@ def _get_ntlm_credentials() -> tuple[str, str] | None:
     try:
         username = input("Username (e.g. CYBERLINK\\yourname or yourname@cyberlink.com): ").strip()
         password = getpass.getpass("Password: ")
-    except (EOFError, KeyboardInterrupt):
+    except Exception:
         username = ""
         password = ""
 
     if username and password:
-        keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER_KEY, username)
-        keyring.set_password(_KEYRING_SERVICE, username, password)
-        print("Credentials saved. You won't be prompted again.\n")
+        try:
+            import keyring
+            keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER_KEY, username)
+            keyring.set_password(_KEYRING_SERVICE, username, password)
+            print("Credentials saved. You won't be prompted again.\n")
+        except Exception:
+            pass
         _ntlm_cache = (username, password)
         return _ntlm_cache
 
@@ -300,21 +306,49 @@ def fetch_bug(bug_code: str, browser: str = "auto") -> tuple[requests.Session, s
     return session, resp.text
 
 
+def _try_sspi(session: requests.Session, url: str) -> bytes | None:
+    """Try Windows SSPI/Negotiate auth using the current Windows login session.
+
+    Uses requests-negotiate-sspi which handles Negotiate/NTLM via Windows SSPI,
+    exactly like the browser does on Windows intranets. No credentials prompt needed.
+    Returns None if the package is unavailable or auth fails.
+    """
+    try:
+        from requests_negotiate_sspi import HttpNegotiateAuth
+    except ImportError:
+        return None
+    try:
+        resp = session.get(url, auth=HttpNegotiateAuth(), timeout=30)
+        if resp.status_code == 401:
+            return None
+        resp.raise_for_status()
+        return resp.content
+    except Exception:
+        return None
+
+
 def fetch_image(session: requests.Session, url: str, browser: str = "auto") -> bytes:
     """
-    Download an image using NTLM Windows auth (credentials stored in system credential storage).
-    Falls back to the cookie-authenticated session if NTLM is not needed.
+    Download an image, handling Windows Authentication on the download endpoint.
+    On Windows, tries SSPI first (uses current Windows login, no prompt needed),
+    then falls back to explicit NTLM credentials stored in system credential storage.
     Raises on failure so the caller can fall back to a local copy.
     """
     from requests_ntlm import HttpNtlmAuth
 
-    # Try the plain cookie session first (avoids a credential prompt for non-NTLM endpoints).
+    # Try the plain cookie session first (avoids auth overhead for non-protected endpoints).
     resp = session.get(url, timeout=30)
     if resp.status_code != 401:
         resp.raise_for_status()
         return resp.content
 
-    # Server requires Windows auth — use NTLM with Keychain-stored credentials.
+    # On Windows, try SSPI (current Windows session credentials, no prompt needed).
+    if sys.platform == "win32":
+        data = _try_sspi(session, url)
+        if data is not None:
+            return data
+
+    # Fall back to NTLM with user-provided credentials.
     creds = _get_ntlm_credentials()
     if creds is None:
         raise RuntimeError("No NTLM credentials provided")
@@ -322,7 +356,7 @@ def fetch_image(session: requests.Session, url: str, browser: str = "auto") -> b
     username, password = creds
     resp = session.get(url, auth=HttpNtlmAuth(username, password), timeout=30)
     if resp.status_code == 401:
-        # Wrong credentials — evict from Keychain so user is re-prompted next run.
+        # Wrong credentials — evict from storage so user is re-prompted next run.
         # Keep in-process cache so we don't prompt again for remaining images this run.
         _evict_keychain_credentials()
         print(
