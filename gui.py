@@ -8,14 +8,17 @@ from tkinter import filedialog, scrolledtext, ttk
 def launch_gui() -> None:
     """Launch the GUI. Called from main.py when no CLI arguments are given."""
     from scraper import (
+        clear_ntlm_credentials,
         load_browser_preference,
         load_cookies_string,
         load_last_bug_code,
+        load_ntlm_username,
         load_output_dir,
         save_browser_preference,
         save_cookies_string,
         save_last_bug_code,
         save_output_dir,
+        set_ntlm_credentials,
     )
     from main import _load_bug_codes_from_file, _parse_bug_code, _resolve_output, _run_single
 
@@ -94,15 +97,37 @@ def launch_gui() -> None:
         row=4, column=2, sticky="w", **pad
     )
 
+    # ── Windows NTLM credentials (image auth fallback) ────────────────────────
+    tk.Label(root, text="Win username:").grid(row=5, column=0, sticky="e", **pad)
+    ntlm_user_var = tk.StringVar(value=load_ntlm_username())
+    tk.Entry(root, textvariable=ntlm_user_var, width=30).grid(
+        row=5, column=1, sticky="w", **pad
+    )
+
+    tk.Label(root, text="Win password:").grid(row=6, column=0, sticky="e", **pad)
+    ntlm_pass_var = tk.StringVar()
+    tk.Entry(root, textvariable=ntlm_pass_var, width=30, show="*").grid(
+        row=6, column=1, sticky="w", **pad
+    )
+
+    def clear_creds() -> None:
+        ntlm_user_var.set("")
+        ntlm_pass_var.set("")
+        clear_ntlm_credentials()
+
+    tk.Button(root, text="Clear", command=clear_creds).grid(
+        row=5, column=2, sticky="w", **pad
+    )
+
     # ── Generate button ───────────────────────────────────────────────────────
     gen_btn = tk.Button(root, text="Generate Slides", width=20)
-    gen_btn.grid(row=5, column=0, columnspan=3, pady=8)
+    gen_btn.grid(row=7, column=0, columnspan=3, pady=8)
 
     # ── Log area ──────────────────────────────────────────────────────────────
     log = scrolledtext.ScrolledText(
         root, height=12, width=58, state="disabled", wrap="word"
     )
-    log.grid(row=6, column=0, columnspan=3, padx=8, pady=(0, 8))
+    log.grid(row=8, column=0, columnspan=3, padx=8, pady=(0, 8))
     log.tag_config("err", foreground="red")
 
     def _log(text: str, tag: str = "") -> None:
@@ -140,6 +165,11 @@ def launch_gui() -> None:
             _log("Error: enter a bug code or select a .txt file.", "err")
             return
 
+        # Pre-populate NTLM credentials before the worker thread starts so
+        # fetch_image can use them without calling input() / getpass (which
+        # crash in a console=False windowed exe).
+        set_ntlm_credentials(ntlm_user_var.get().strip(), ntlm_pass_var.get())
+
         gen_btn.config(state="disabled")
         _log("─" * 50)
 
@@ -171,6 +201,7 @@ def launch_gui() -> None:
                 sys.stderr.flush()
                 sys.stdout = old_out
                 sys.stderr = old_err
+                root.after(0, lambda: ntlm_pass_var.set(""))
                 root.after(0, lambda: gen_btn.config(state="normal"))
 
         threading.Thread(target=run, daemon=True).start()

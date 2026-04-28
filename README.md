@@ -223,8 +223,12 @@ Double-clicking the built executable (`eBug_to_slide.app` / `eBug_to_slide.exe`)
 | Output dir | Where `.pptx` files are saved (pre-filled from `.env`) |
 | Browser | Browser to read cookies from (pre-filled from `.env`) |
 | Cookie string | Manual cookie fallback — paste the `Cookie:` header value here (see Windows note below) |
+| Win username | CyberLink domain username for image auth (e.g. `CYBERLINK\yourname`) — saved to Windows Credential Manager |
+| Win password | Domain password — saved to Windows Credential Manager after first successful auth |
 
-All fields are saved to `.env` when Generate is clicked. Use the **Clear** button next to Cookie string to remove a saved value.
+All fields are saved when Generate is clicked. Use the **Clear** buttons to remove saved values.
+
+> **Windows image auth:** Enter your domain credentials in the **Win username / Win password** fields the first time you run the exe. They are saved in Windows Credential Manager so you only need to do this once. The tool also tries Windows SSPI (automatic single-sign-on) first — if your machine is domain-joined and you are already authenticated, images will download without any credentials prompt.
 
 ### Build the executable
 
@@ -295,7 +299,8 @@ Run with `--debug` to save the raw HTML. Open `<bug_code>_debug.html` and check 
 **Images fail to download (401)**  
 The image download endpoint (`DownloadeBugFile.ashx`) uses Windows Authentication, separate from the cookie-based eBug session.
 
-- **On Windows:** The tool automatically tries Windows SSPI (the same mechanism browsers use) using your current Windows login. This should work transparently with no prompt. If SSPI fails, it will fall back to prompting for your CyberLink network credentials (stored in Windows Credential Manager for future runs). Make sure `requests-negotiate-sspi` is installed — it is included in `requirements.txt` and the `.exe` build.
+- **On Windows (exe):** Enter your domain credentials in the **Win username / Win password** fields in the GUI. They are saved in Windows Credential Manager after the first successful auth, so subsequent runs pre-fill the username and only need the password re-entered if it changes. The tool also tries Windows SSPI first — on domain-joined machines this handles auth automatically with no fields needed.
+- **On Windows (CLI / `python main.py`):** The tool will prompt for credentials in the terminal and save them to Windows Credential Manager for future runs.
 - **On macOS:** The tool will prompt for your CyberLink domain credentials (stored in Keychain). Enter `CYBERLINK\yourname` or `yourname@cyberlink.com` when asked.
 - **Manual fallback:** If auth still fails, the tool prints the exact download URLs and a target folder. Open each URL in your browser (which handles auth automatically), save the file with its original name to `images/<bug_code>/`, then re-run — the tool checks that folder for local copies before attempting a download.
 

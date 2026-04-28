@@ -197,6 +197,31 @@ def clear_ntlm_credentials() -> None:
     print("Credentials cleared from system credential storage.")
 
 
+def load_ntlm_username() -> str:
+    """Return the previously stored NTLM username, or '' if none."""
+    try:
+        import keyring
+        return keyring.get_password(_KEYRING_SERVICE, _KEYRING_USER_KEY) or ""
+    except Exception:
+        return ""
+
+
+def set_ntlm_credentials(username: str, password: str) -> None:
+    """Pre-populate NTLM credentials (called from GUI before the worker thread starts).
+
+    Credentials are held in memory only; keyring is written only after a confirmed
+    successful auth in fetch_image so we never persist wrong passwords.
+
+    Calling with both empty means 'nothing entered — let keyring auto-load handle it'.
+    Calling with only one empty means 'incomplete — suppress auth this run'.
+    """
+    global _ntlm_cache
+    if username and password:
+        _ntlm_cache = (username, password)
+    else:
+        _ntlm_cache = None  # let _get_ntlm_credentials() check keyring normally
+
+
 # ---------------------------------------------------------------------------
 # Cookie extraction
 # ---------------------------------------------------------------------------
@@ -366,4 +391,11 @@ def fetch_image(session: requests.Session, url: str, browser: str = "auto") -> b
         )
         raise RuntimeError("NTLM auth failed")
     resp.raise_for_status()
+    # Auth confirmed — safe to persist credentials now.
+    try:
+        import keyring
+        keyring.set_password(_KEYRING_SERVICE, _KEYRING_USER_KEY, username)
+        keyring.set_password(_KEYRING_SERVICE, username, password)
+    except Exception:
+        pass
     return resp.content

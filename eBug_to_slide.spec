@@ -21,6 +21,13 @@ a = Analysis(
         "keyring.backends.fail",
         "requests_ntlm",
         "requests_negotiate_sspi",
+        # pywin32 C-extensions needed by requests_negotiate_sspi (SSPI path)
+        "sspi",
+        "sspicon",
+        "win32security",
+        "win32api",
+        "win32con",
+        "pywintypes",
         "lxml._elementpath",
         "PIL._tkinter_finder",
         "tkinter",
